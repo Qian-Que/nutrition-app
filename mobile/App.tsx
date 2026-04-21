@@ -73,7 +73,21 @@ type FoodLog = {
   proteinGram: number;
   carbsGram: number;
   fatGram: number;
+  fiberGram?: number;
+  sugarGram?: number;
+  sodiumMg?: number;
+  items?: unknown;
   note?: string;
+  imageUri?: string | null;
+};
+
+type CalendarDaySummary = {
+  date: string;
+  count: number;
+  calories: number;
+  proteinGram: number;
+  carbsGram: number;
+  fatGram: number;
 };
 
 type FriendItem = {
@@ -98,7 +112,7 @@ type GroupMembership = {
 
 type MealType = "BREAKFAST" | "LUNCH" | "DINNER" | "SNACK";
 type Visibility = "PRIVATE" | "FRIENDS" | "PUBLIC";
-type Sex = "MALE" | "FEMALE" | "OTHER";
+type Sex = "MALE" | "FEMALE";
 type ActivityLevel = "SEDENTARY" | "LIGHT" | "MODERATE" | "ACTIVE" | "VERY_ACTIVE";
 type Goal = "LOSE_WEIGHT" | "MAINTAIN" | "GAIN_MUSCLE";
 type GroupRole = "OWNER" | "ADMIN" | "MEMBER";
@@ -124,7 +138,6 @@ const visibilityOptions: ReadonlyArray<Option<Visibility>> = [
 const sexOptions: ReadonlyArray<Option<Sex>> = [
   { label: "男", value: "MALE" },
   { label: "女", value: "FEMALE" },
-  { label: "其他", value: "OTHER" },
 ];
 
 const activityOptions: ReadonlyArray<Option<ActivityLevel>> = [
@@ -261,10 +274,50 @@ async function apiRequest<T>(
 
 function todayDateString() {
   const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
+  return toDateString(now);
+}
+
+function toDateString(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+function shiftDateString(dateString: string, deltaDays: number) {
+  const date = new Date(`${dateString}T12:00:00`);
+  date.setDate(date.getDate() + deltaDays);
+  return toDateString(date);
+}
+
+function toMonthString(dateString: string) {
+  return dateString.slice(0, 7);
+}
+
+function shiftMonthString(monthString: string, deltaMonths: number) {
+  const [yearRaw, monthRaw] = monthString.split("-");
+  const date = new Date(Number(yearRaw), Number(monthRaw) - 1, 1);
+  date.setMonth(date.getMonth() + deltaMonths);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function buildCalendarCells(monthString: string) {
+  const [yearRaw, monthRaw] = monthString.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const firstDay = new Date(year, month - 1, 1);
+  const startOffset = firstDay.getDay();
+  const startDate = new Date(year, month - 1, 1 - startOffset);
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(startDate);
+    date.setDate(startDate.getDate() + index);
+    return {
+      date: toDateString(date),
+      day: date.getDate(),
+      inCurrentMonth: date.getMonth() === month - 1,
+    };
+  });
 }
 
 function NumberInput({
@@ -501,18 +554,41 @@ function DashboardScreen({ token, refreshKey }: { token: string; refreshKey: num
     targetFatGram: number | null;
   }>(null);
   const [loading, setLoading] = useState(false);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(todayDateString());
+  const [selectedMonth, setSelectedMonth] = useState(toMonthString(todayDateString()));
+  const [monthStats, setMonthStats] = useState<Record<string, CalendarDaySummary>>({});
 
   const [calories, setCalories] = useState("");
   const [protein, setProtein] = useState("");
   const [carbs, setCarbs] = useState("");
   const [fat, setFat] = useState("");
   const [mealType, setMealType] = useState<MealType>("LUNCH");
+  const [manualVisibility, setManualVisibility] = useState<Visibility>("PRIVATE");
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState<"MANUAL" | "AI">("MANUAL");
+  const [editingLoggedAt, setEditingLoggedAt] = useState<string | null>(null);
+
+  const resetManualForm = useCallback(() => {
+    setEditingLogId(null);
+    setEditingSource("MANUAL");
+    setEditingLoggedAt(null);
+    setMealType("LUNCH");
+    setManualVisibility("PRIVATE");
+    setCalories("");
+    setProtein("");
+    setCarbs("");
+    setFat("");
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [logPayload, targetPayload] = await Promise.all([
-        apiRequest<{ logs: FoodLog[]; summary: typeof summary }>(`/api/logs?date=${todayDateString()}`, {}, token),
+        apiRequest<{
+          logs: FoodLog[];
+          summary: { calories: number; proteinGram: number; carbsGram: number; fatGram: number; fiberGram: number };
+        }>(`/api/logs?date=${selectedDate}`, {}, token),
         apiRequest<{
           profile: {
             targetCalories: number | null;
@@ -530,11 +606,42 @@ function DashboardScreen({ token, refreshKey }: { token: string; refreshKey: num
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [selectedDate, token]);
+
+  const loadCalendar = useCallback(async () => {
+    setCalendarLoading(true);
+    try {
+      const payload = await apiRequest<{ month: string; days: CalendarDaySummary[] }>(
+        `/api/logs/calendar?month=${selectedMonth}`,
+        {},
+        token,
+      );
+      const nextStats: Record<string, CalendarDaySummary> = {};
+      for (const day of payload.days) {
+        nextStats[day.date] = day;
+      }
+      setMonthStats(nextStats);
+    } catch (error) {
+      Alert.alert("加载日历失败", normalizeErrorMessage(error));
+    } finally {
+      setCalendarLoading(false);
+    }
+  }, [selectedMonth, token]);
 
   useEffect(() => {
     void load();
   }, [load, refreshKey]);
+
+  useEffect(() => {
+    void loadCalendar();
+  }, [loadCalendar, refreshKey]);
+
+  useEffect(() => {
+    const monthFromDate = toMonthString(selectedDate);
+    if (monthFromDate !== selectedMonth) {
+      setSelectedMonth(monthFromDate);
+    }
+  }, [selectedDate, selectedMonth]);
 
   const remainCalories = useMemo(() => {
     if (!dailyTarget?.targetCalories) {
@@ -543,21 +650,33 @@ function DashboardScreen({ token, refreshKey }: { token: string; refreshKey: num
     return Math.round(dailyTarget.targetCalories - summary.calories);
   }, [dailyTarget?.targetCalories, summary.calories]);
 
-  const addManualLog = useCallback(async () => {
+  const selectedDayStats = monthStats[selectedDate];
+  const previousDayStats = monthStats[shiftDateString(selectedDate, -1)];
+  const caloriesChange =
+    selectedDayStats && previousDayStats
+      ? Math.round(selectedDayStats.calories - previousDayStats.calories)
+      : null;
+
+  const submitManualLog = useCallback(async () => {
     if (!calories || !protein || !carbs || !fat) {
       Alert.alert("提示", "请完整填写营养数据。");
       return;
     }
 
     try {
+      const loggedAt = editingLoggedAt ?? new Date(`${selectedDate}T12:00:00`).toISOString();
+      const path = editingLogId ? `/api/logs/${editingLogId}` : "/api/logs";
+      const method = editingLogId ? "PUT" : "POST";
+
       await apiRequest<{ log: FoodLog }>(
-        "/api/logs",
+        path,
         {
-          method: "POST",
+          method,
           body: JSON.stringify({
+            loggedAt,
             mealType,
-            source: "MANUAL",
-            visibility: "PRIVATE",
+            source: editingLogId ? editingSource : "MANUAL",
+            visibility: manualVisibility,
             calories: Number(calories),
             proteinGram: Number(protein),
             carbsGram: Number(carbs),
@@ -566,23 +685,159 @@ function DashboardScreen({ token, refreshKey }: { token: string; refreshKey: num
         },
         token,
       );
-      setCalories("");
-      setProtein("");
-      setCarbs("");
-      setFat("");
-      await load();
+
+      resetManualForm();
+      await Promise.all([load(), loadCalendar()]);
     } catch (error) {
       Alert.alert("保存失败", normalizeErrorMessage(error));
     }
-  }, [calories, carbs, fat, load, mealType, protein, token]);
+  }, [
+    calories,
+    carbs,
+    editingLogId,
+    editingLoggedAt,
+    editingSource,
+    fat,
+    load,
+    loadCalendar,
+    manualVisibility,
+    mealType,
+    protein,
+    resetManualForm,
+    selectedDate,
+    token,
+  ]);
+
+  const startEditLog = useCallback((item: FoodLog) => {
+    setEditingLogId(item.id);
+    setEditingSource(item.source);
+    setEditingLoggedAt(item.loggedAt);
+    setMealType(item.mealType);
+    setManualVisibility(item.visibility);
+    setCalories(String(item.calories));
+    setProtein(String(item.proteinGram));
+    setCarbs(String(item.carbsGram));
+    setFat(String(item.fatGram));
+    setSelectedDate(item.loggedAt.slice(0, 10));
+  }, []);
+
+  const deleteLog = useCallback(
+    (item: FoodLog) => {
+      Alert.alert("确认删除", "确定删除这条记录吗？", [
+        { text: "取消", style: "cancel" },
+        {
+          text: "删除",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              try {
+                await apiRequest(`/api/logs/${item.id}`, { method: "DELETE" }, token);
+                if (editingLogId === item.id) {
+                  resetManualForm();
+                }
+                await Promise.all([load(), loadCalendar()]);
+              } catch (error) {
+                Alert.alert("删除失败", normalizeErrorMessage(error));
+              }
+            })();
+          },
+        },
+      ]);
+    },
+    [editingLogId, load, loadCalendar, resetManualForm, token],
+  );
+
+  const calendarCells = useMemo(() => buildCalendarCells(selectedMonth), [selectedMonth]);
+  const weekLabels = ["日", "一", "二", "三", "四", "五", "六"];
 
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.screenContainer}>
-        <Text style={styles.screenTitle}>今日饮食</Text>
+        <Text style={styles.screenTitle}>饮食记录</Text>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>今日摄入</Text>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>日历查看</Text>
+            <View style={styles.rowGap}>
+              <Pressable
+                style={styles.ghostButton}
+                onPress={() => {
+                  const nextMonth = shiftMonthString(selectedMonth, -1);
+                  setSelectedMonth(nextMonth);
+                  setSelectedDate(`${nextMonth}-01`);
+                }}
+              >
+                <Text style={styles.ghostButtonText}>上月</Text>
+              </Pressable>
+              <Pressable
+                style={styles.ghostButton}
+                onPress={() => {
+                  const nextMonth = shiftMonthString(selectedMonth, 1);
+                  setSelectedMonth(nextMonth);
+                  setSelectedDate(`${nextMonth}-01`);
+                }}
+              >
+                <Text style={styles.ghostButtonText}>下月</Text>
+              </Pressable>
+            </View>
+          </View>
+          <Text style={styles.metric}>{selectedMonth}</Text>
+          <Text style={styles.hint}>选中日期：{selectedDate}</Text>
+          {caloriesChange !== null ? (
+            <Text style={[styles.hint, caloriesChange > 0 ? styles.dangerText : undefined]}>
+              相比前一天：{caloriesChange > 0 ? "+" : ""}
+              {caloriesChange} 千卡
+            </Text>
+          ) : null}
+          {calendarLoading ? <Text style={styles.hint}>日历数据加载中...</Text> : null}
+
+          <View style={styles.calendarWeekRow}>
+            {weekLabels.map((label) => (
+              <View key={label} style={styles.calendarWeekCell}>
+                <Text style={styles.calendarWeekText}>{label}</Text>
+              </View>
+            ))}
+          </View>
+          <View style={styles.calendarGrid}>
+            {calendarCells.map((cell) => {
+              const dayStats = monthStats[cell.date];
+              const active = cell.date === selectedDate;
+              return (
+                <View key={cell.date} style={styles.calendarCell}>
+                  <Pressable
+                    style={[
+                      styles.calendarCellButton,
+                      active && styles.calendarCellButtonActive,
+                      !cell.inCurrentMonth && styles.calendarCellButtonMuted,
+                    ]}
+                    onPress={() => {
+                      setSelectedDate(cell.date);
+                    }}
+                  >
+                    <Text style={[styles.calendarDayText, active && styles.calendarDayTextActive]}>{cell.day}</Text>
+                    <Text style={[styles.calendarCalText, active && styles.calendarCalTextActive]}>
+                      {dayStats ? Math.round(dayStats.calories) : "-"}
+                    </Text>
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>{selectedDate} 摄入</Text>
+            <View style={styles.rowGap}>
+              <Pressable style={styles.ghostButton} onPress={() => setSelectedDate(shiftDateString(selectedDate, -1))}>
+                <Text style={styles.ghostButtonText}>前一天</Text>
+              </Pressable>
+              <Pressable style={styles.ghostButton} onPress={() => setSelectedDate(shiftDateString(selectedDate, 1))}>
+                <Text style={styles.ghostButtonText}>后一天</Text>
+              </Pressable>
+            </View>
+          </View>
+
           <Text style={styles.metric}>热量：{Math.round(summary.calories)} 千卡</Text>
           <Text style={styles.metric}>蛋白质：{summary.proteinGram.toFixed(1)} g</Text>
           <Text style={styles.metric}>碳水：{summary.carbsGram.toFixed(1)} g</Text>
@@ -597,26 +852,34 @@ function DashboardScreen({ token, refreshKey }: { token: string; refreshKey: num
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>手动添加记录</Text>
+          <Text style={styles.cardTitle}>{editingLogId ? "编辑记录" : "手动添加记录"}</Text>
           <OptionRow label="餐次" options={mealOptions} value={mealType} onChange={setMealType} />
+          <OptionRow label="可见范围" options={visibilityOptions} value={manualVisibility} onChange={setManualVisibility} />
           <NumberInput value={calories} onChangeText={setCalories} placeholder="热量（千卡）" />
           <NumberInput value={protein} onChangeText={setProtein} placeholder="蛋白质（g）" />
           <NumberInput value={carbs} onChangeText={setCarbs} placeholder="碳水（g）" />
           <NumberInput value={fat} onChangeText={setFat} placeholder="脂肪（g）" />
-          <Pressable style={styles.primaryButton} onPress={addManualLog}>
-            <Text style={styles.primaryButtonText}>保存记录</Text>
-          </Pressable>
+          <View style={styles.rowGap}>
+            <Pressable style={styles.primaryButton} onPress={submitManualLog}>
+              <Text style={styles.primaryButtonText}>{editingLogId ? "更新记录" : "保存记录"}</Text>
+            </Pressable>
+            {editingLogId ? (
+              <Pressable style={styles.ghostButton} onPress={resetManualForm}>
+                <Text style={styles.ghostButtonText}>取消编辑</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
 
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>今日记录列表</Text>
+            <Text style={styles.cardTitle}>{selectedDate} 记录列表</Text>
             <Pressable style={styles.ghostButton} onPress={() => void load()}>
               <Text style={styles.ghostButtonText}>{loading ? "加载中..." : "刷新"}</Text>
             </Pressable>
           </View>
 
-          {logs.length === 0 ? <Text style={styles.hint}>今天还没有记录。</Text> : null}
+          {logs.length === 0 ? <Text style={styles.hint}>当前日期还没有记录。</Text> : null}
           {logs.map((item) => (
             <View key={item.id} style={styles.logRow}>
               <Text style={styles.logTitle}>
@@ -625,8 +888,17 @@ function DashboardScreen({ token, refreshKey }: { token: string; refreshKey: num
               <Text style={styles.logSub}>
                 蛋白质 {item.proteinGram}g / 碳水 {item.carbsGram}g / 脂肪 {item.fatGram}g
               </Text>
+              <Text style={styles.logSub}>来源：{item.source === "AI" ? "智能识别" : "手动录入"}</Text>
               <Text style={styles.logSub}>可见范围：{formatVisibility(item.visibility)}</Text>
-              <Text style={styles.logSub}>{new Date(item.loggedAt).toLocaleTimeString()}</Text>
+              <Text style={styles.logSub}>{new Date(item.loggedAt).toLocaleString()}</Text>
+              <View style={styles.rowGap}>
+                <Pressable style={styles.secondaryButton} onPress={() => startEditLog(item)}>
+                  <Text style={styles.secondaryButtonText}>编辑</Text>
+                </Pressable>
+                <Pressable style={styles.ghostButton} onPress={() => deleteLog(item)}>
+                  <Text style={styles.dangerText}>删除</Text>
+                </Pressable>
+              </View>
             </View>
           ))}
         </View>
@@ -828,7 +1100,7 @@ function TargetsScreen({ token }: { token: string }) {
           age: number | null;
           heightCm: number | null;
           weightKg: number | null;
-          sex: Sex | null;
+          sex: string | null;
           activityLevel: ActivityLevel | null;
           goal: Goal | null;
         };
@@ -843,7 +1115,7 @@ function TargetsScreen({ token }: { token: string }) {
       if (payload.profile.weightKg) {
         setWeight(String(payload.profile.weightKg));
       }
-      if (payload.profile.sex) {
+      if (payload.profile.sex === "MALE" || payload.profile.sex === "FEMALE") {
         setSex(payload.profile.sex);
       }
       if (payload.profile.activityLevel) {
@@ -1584,6 +1856,61 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     flexWrap: "wrap",
+  },
+  calendarWeekRow: {
+    flexDirection: "row",
+    marginTop: 10,
+  },
+  calendarWeekCell: {
+    width: "14.285%",
+    alignItems: "center",
+  },
+  calendarWeekText: {
+    color: "#8fa1c0",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  calendarGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 6,
+  },
+  calendarCell: {
+    width: "14.285%",
+    padding: 2,
+  },
+  calendarCellButton: {
+    borderWidth: 1,
+    borderColor: "#2f3e57",
+    borderRadius: 8,
+    minHeight: 52,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 5,
+    paddingHorizontal: 2,
+  },
+  calendarCellButtonActive: {
+    borderColor: "#4f88ff",
+    backgroundColor: "#1b2c4e",
+  },
+  calendarCellButtonMuted: {
+    opacity: 0.45,
+  },
+  calendarDayText: {
+    color: "#dce7ff",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  calendarDayTextActive: {
+    color: "#f7fbff",
+  },
+  calendarCalText: {
+    marginTop: 2,
+    color: "#90a6cb",
+    fontSize: 10,
+  },
+  calendarCalTextActive: {
+    color: "#d3e2ff",
   },
   previewImage: {
     width: "100%",

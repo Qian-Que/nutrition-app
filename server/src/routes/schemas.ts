@@ -1,6 +1,6 @@
 ﻿import { z } from "zod";
 
-export const sexValues = ["MALE", "FEMALE", "OTHER"] as const;
+export const sexValues = ["MALE", "FEMALE"] as const;
 export const activityLevelValues = ["SEDENTARY", "LIGHT", "MODERATE", "ACTIVE", "VERY_ACTIVE"] as const;
 export const goalValues = ["LOSE_WEIGHT", "MAINTAIN", "GAIN_MUSCLE"] as const;
 export const mealTypeValues = ["BREAKFAST", "LUNCH", "DINNER", "SNACK"] as const;
