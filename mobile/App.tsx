@@ -178,13 +178,13 @@ function normalizeErrorMessage(error: unknown) {
   }
 
   if (error.name === "AbortError" || error.message.includes("请求超时")) {
-    return "请求超时，请检查网络后重试（局域网调试请关闭 VPN 并确保手机与电脑同一 Wi-Fi）。";
+    return "请求超时，请检查网络后重试。若已使用云端接口，请检查 Railway 服务状态与 AI 变量配置。";
   }
   if (error.message.includes("接口地址未配置")) {
     return "接口地址未配置，请先在登录页设置后端地址。";
   }
   if (error.message.includes("Network request failed")) {
-    return "网络请求失败，请检查接口地址、同网连接、防火墙设置，并尝试关闭 VPN。";
+    return "网络请求失败，请检查接口地址是否为可访问的 HTTPS 域名。若是本地调试，请检查同网连接、防火墙和 VPN。";
   }
   if (error.message.trim().length === 0) {
     return fallback;
@@ -656,13 +656,13 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
         mode === "camera"
           ? await ImagePicker.launchCameraAsync({
               allowsEditing: true,
-              quality: 0.7,
+              quality: 0.5,
               base64: true,
               mediaTypes: ImagePicker.MediaTypeOptions.Images,
             })
           : await ImagePicker.launchImageLibraryAsync({
               allowsEditing: true,
-              quality: 0.7,
+              quality: 0.5,
               base64: true,
               mediaTypes: ImagePicker.MediaTypeOptions.Images,
             });
@@ -692,6 +692,7 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
             }),
           },
           token,
+          { timeoutMs: 90000 },
         );
         setAnalysis(payload.analysis);
       } catch (error) {

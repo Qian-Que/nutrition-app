@@ -122,6 +122,10 @@ AI_IMAGE_DETAIL="auto"
   - 确认 `AI_MODEL` 是支持图像输入的视觉模型
 - 提示“AI_API_KEY 无效或已过期”：
   - 检查并更新 `AI_API_KEY`
+- 提示“请求超时”：
+  - 检查 Railway 服务是否在线
+  - 检查 `AI_BASE_URL / AI_API_KEY / AI_MODEL` 是否正确
+  - 可适当调大 `AI_TIMEOUT_MS`（例如 60000）
 
 ## 启动移动端
 
@@ -136,6 +140,11 @@ npm run start
 
 - `EXPO_PUBLIC_API_BASE_URL`：后端 API 地址
 - `EXPO_PUBLIC_API_TIMEOUT_MS`：请求超时毫秒数（默认 30000）
+
+说明（独立安装包）：
+- App 内“接口配置”优先级高于 `mobile/.env`
+- 只要你在登录页保存了云端地址，后续请求会使用该地址
+- 不需要把 Railway 域名再写回本地 `mobile/.env`
 
 常见地址：
 - iOS 模拟器 / Web：`http://127.0.0.1:4000`
