@@ -5,3 +5,5 @@ mobile/.env
 server/dist
 server/data
 mobile/.expo
+mobile_git_backup_*
+server/tmp_*
