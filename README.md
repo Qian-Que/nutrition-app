@@ -50,6 +50,7 @@ npm run dev
 
 1. 把仓库推到 GitHub（或 GitLab）。
 2. 在 Render / Railway 创建服务，服务根目录指向 `server`。
+   - Railway 新建页请选择 `GitHub Repository`
 3. 使用 Docker 部署（仓库已提供 `server/Dockerfile`）。
 4. 配置环境变量（至少这些）：
    - `PORT=4000`
@@ -62,7 +63,8 @@ npm run dev
 7. 在手机 App 登录页“接口配置”里填这个 HTTPS 地址，点“测试连接”，成功后再登录/注册。
 
 完整图文步骤见：
-- [`docs/云端部署完整教程-Render.md`](docs/云端部署完整教程-Render.md)
+- Railway（推荐）：[`docs/云端部署完整教程-Railway.md`](docs/云端部署完整教程-Railway.md)
+- Render（备选）：[`docs/云端部署完整教程-Render.md`](docs/云端部署完整教程-Render.md)
 
 ### 后端环境变量（`server/.env`）
 
@@ -75,6 +77,9 @@ npm run dev
 - `AI_MODEL`：模型名（支持非 GPT）
 - `AI_IMAGE_DETAIL`：图片细节等级（`low` / `high` / `auto`）
 - `AI_TIMEOUT_MS`：请求超时毫秒
+
+后端运行环境要求：
+- Node.js `>= 22`（使用 `node:sqlite`）
 
 ### 多模型 API 接入步骤（不限 GPT）
 
