@@ -110,6 +110,50 @@ type GroupMembership = {
   };
 };
 
+type SocialFeedItem = {
+  id: string;
+  userId: string;
+  loggedAt: string;
+  mealType: MealType | string;
+  note?: string | null;
+  items?: unknown;
+  source: "MANUAL" | "AI" | string;
+  visibility: Visibility | string;
+  calories: number;
+  proteinGram: number;
+  carbsGram: number;
+  fatGram: number;
+  user: {
+    id: string;
+    displayName: string;
+  };
+};
+
+type FriendDetailPayload = {
+  friend: {
+    id: string;
+    email: string;
+    displayName: string;
+    age: number | null;
+    sex: string | null;
+    activityLevel: string | null;
+    goal: string | null;
+    targetCalories: number | null;
+    targetProteinGram: number | null;
+    targetCarbsGram: number | null;
+    targetFatGram: number | null;
+  };
+  stats: {
+    days: number;
+    logCount: number;
+    caloriesSum: number;
+    proteinSum: number;
+    carbsSum: number;
+    fatSum: number;
+  };
+  recentLogs: FoodLog[];
+};
+
 type MealType = "BREAKFAST" | "LUNCH" | "DINNER" | "SNACK";
 type Visibility = "PRIVATE" | "FRIENDS" | "PUBLIC";
 type Sex = "MALE" | "FEMALE";
@@ -206,17 +250,21 @@ function extractFoodNames(items: unknown): string[] {
     .filter((name) => name.length > 0);
 }
 
-function summarizeFoodFromLog(log: FoodLog): string {
-  const names = extractFoodNames(log.items);
+function summarizeFood(items: unknown, note?: string | null): string {
+  const names = extractFoodNames(items);
   if (names.length > 0) {
     return names.join("、");
   }
 
-  if (typeof log.note === "string" && log.note.trim().length > 0) {
-    return log.note.trim();
+  if (typeof note === "string" && note.trim().length > 0) {
+    return note.trim();
   }
 
   return "未填写";
+}
+
+function summarizeFoodFromLog(log: FoodLog): string {
+  return summarizeFood(log.items, log.note);
 }
 
 function normalizeErrorMessage(error: unknown) {
@@ -1363,7 +1411,9 @@ function SocialScreen({ token, user, onLogout }: { token: string; user: AuthUser
   const [incoming, setIncoming] = useState<any[]>([]);
   const [outgoing, setOutgoing] = useState<any[]>([]);
   const [groups, setGroups] = useState<GroupMembership[]>([]);
-  const [feed, setFeed] = useState<any[]>([]);
+  const [feed, setFeed] = useState<SocialFeedItem[]>([]);
+  const [friendDetail, setFriendDetail] = useState<FriendDetailPayload | null>(null);
+  const [friendDetailLoading, setFriendDetailLoading] = useState(false);
 
   const [friendEmail, setFriendEmail] = useState("");
   const [groupName, setGroupName] = useState("");
@@ -1381,7 +1431,7 @@ function SocialScreen({ token, user, onLogout }: { token: string; user: AuthUser
         apiRequest<{ friends: FriendItem[] }>("/api/friends", {}, token),
         apiRequest<{ incoming: any[]; outgoing: any[] }>("/api/friends/requests", {}, token),
         apiRequest<{ memberships: GroupMembership[] }>("/api/groups/my", {}, token),
-        apiRequest<{ feed: any[] }>("/api/feed/friends?limit=20", {}, token),
+        apiRequest<{ feed: SocialFeedItem[] }>("/api/feed/friends?limit=20", {}, token),
       ]);
       setFriends(friendsPayload.friends);
       setIncoming(requestsPayload.incoming);
@@ -1396,6 +1446,21 @@ function SocialScreen({ token, user, onLogout }: { token: string; user: AuthUser
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  const loadFriendDetail = useCallback(
+    async (friendId: string) => {
+      setFriendDetailLoading(true);
+      try {
+        const payload = await apiRequest<FriendDetailPayload>(`/api/friends/${friendId}/profile?days=30&limit=10`, {}, token);
+        setFriendDetail(payload);
+      } catch (error) {
+        Alert.alert("加载好友详情失败", normalizeErrorMessage(error));
+      } finally {
+        setFriendDetailLoading(false);
+      }
+    },
+    [token],
+  );
 
   const sendRequest = useCallback(async () => {
     if (!friendEmail) {
@@ -1532,6 +1597,29 @@ function SocialScreen({ token, user, onLogout }: { token: string; user: AuthUser
         <Text style={styles.screenTitle}>社交</Text>
         <Text style={styles.hint}>当前账号：{user.displayName}</Text>
 
+        <View style={[styles.card, styles.highlightCard]}>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>好友动态</Text>
+            <Pressable style={styles.ghostButton} onPress={() => void loadAll()}>
+              <Text style={styles.ghostButtonText}>刷新动态</Text>
+            </Pressable>
+          </View>
+          {feed.length === 0 ? <Text style={styles.hint}>暂无好友动态</Text> : null}
+          {feed.map((item) => (
+            <View key={item.id} style={styles.logRow}>
+              <Text style={styles.logTitle}>{item.user.displayName}</Text>
+              <Text style={styles.logSub}>
+                {formatMealType(item.mealType)} · {Math.round(item.calories)} 千卡
+              </Text>
+              <Text style={styles.logSub}>吃了：{summarizeFood(item.items, item.note)}</Text>
+              <Text style={styles.logSub}>
+                蛋白质 {item.proteinGram} / 碳水 {item.carbsGram} / 脂肪 {item.fatGram}
+              </Text>
+              <Text style={styles.hint}>{new Date(item.loggedAt).toLocaleString()}</Text>
+            </View>
+          ))}
+        </View>
+
         <View style={styles.card}>
           <Text style={styles.cardTitle}>好友系统</Text>
           <TextInput
@@ -1575,11 +1663,48 @@ function SocialScreen({ token, user, onLogout }: { token: string; user: AuthUser
           <Text style={styles.sectionTitle}>我的好友（{friends.length}）</Text>
           {friends.length === 0 ? <Text style={styles.hint}>暂无好友</Text> : null}
           {friends.map((friend) => (
-            <Text key={friend.id} style={styles.logSub}>
-              - {friend.displayName}（{friend.email}）
-            </Text>
+            <Pressable key={friend.id} style={styles.logRow} onPress={() => void loadFriendDetail(friend.id)}>
+              <Text style={styles.logTitle}>{friend.displayName}</Text>
+              <Text style={styles.logSub}>{friend.email}</Text>
+              <Text style={styles.hint}>点击查看好友详情</Text>
+            </Pressable>
           ))}
         </View>
+
+        {friendDetailLoading && !friendDetail ? (
+          <View style={styles.card}>
+            <Text style={styles.hint}>正在加载好友详情...</Text>
+          </View>
+        ) : null}
+
+        {friendDetail ? (
+          <View style={[styles.card, styles.detailCard]}>
+            <Text style={styles.cardTitle}>好友详情：{friendDetail.friend.displayName}</Text>
+            <Text style={styles.logSub}>邮箱：{friendDetail.friend.email}</Text>
+            <Text style={styles.logSub}>
+              近 {friendDetail.stats.days} 天：{friendDetail.stats.logCount} 条记录，累计 {Math.round(friendDetail.stats.caloriesSum)} 千卡
+            </Text>
+            <Text style={styles.logSub}>
+              目标：热量 {friendDetail.friend.targetCalories ?? "-"}，蛋白质 {friendDetail.friend.targetProteinGram ?? "-"}，
+              碳水 {friendDetail.friend.targetCarbsGram ?? "-"}，脂肪 {friendDetail.friend.targetFatGram ?? "-"}
+            </Text>
+            <Text style={styles.sectionTitle}>最近记录</Text>
+            {friendDetailLoading ? <Text style={styles.hint}>加载中...</Text> : null}
+            {friendDetail.recentLogs.length === 0 ? <Text style={styles.hint}>暂无可见记录</Text> : null}
+            {friendDetail.recentLogs.map((log) => (
+              <View key={log.id} style={styles.logRow}>
+                <Text style={styles.logTitle}>
+                  {formatMealType(log.mealType)} · {Math.round(log.calories)} 千卡
+                </Text>
+                <Text style={styles.logSub}>吃了：{summarizeFoodFromLog(log)}</Text>
+                <Text style={styles.logSub}>
+                  蛋白质 {log.proteinGram} / 碳水 {log.carbsGram} / 脂肪 {log.fatGram}
+                </Text>
+                <Text style={styles.hint}>{new Date(log.loggedAt).toLocaleString()}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>群组系统</Text>
@@ -1668,28 +1793,6 @@ function SocialScreen({ token, user, onLogout }: { token: string; user: AuthUser
                 {formatMealType(item.foodLog.mealType)} · {Math.round(item.foodLog.calories)} 千卡
               </Text>
               {item.message ? <Text style={styles.logSub}>{item.message}</Text> : null}
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>好友动态</Text>
-            <Pressable style={styles.ghostButton} onPress={() => void loadAll()}>
-              <Text style={styles.ghostButtonText}>刷新</Text>
-            </Pressable>
-          </View>
-
-          {feed.length === 0 ? <Text style={styles.hint}>暂无好友动态</Text> : null}
-          {feed.map((item) => (
-            <View key={item.id} style={styles.logRow}>
-              <Text style={styles.logTitle}>{item.user.displayName}</Text>
-              <Text style={styles.logSub}>
-                {formatMealType(item.mealType)} · {Math.round(item.calories)} 千卡
-              </Text>
-              <Text style={styles.logSub}>
-                蛋白质 {item.proteinGram} / 碳水 {item.carbsGram} / 脂肪 {item.fatGram}
-              </Text>
             </View>
           ))}
         </View>
@@ -1944,6 +2047,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 14,
     padding: 12,
+  },
+  highlightCard: {
+    borderColor: "#2f73ff",
+    backgroundColor: "#0f2342",
+  },
+  detailCard: {
+    borderColor: "#415677",
   },
   cardTitle: {
     color: "#edf2ff",

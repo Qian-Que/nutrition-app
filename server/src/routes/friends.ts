@@ -7,6 +7,50 @@ import { respondFriendRequestSchema, sendFriendRequestSchema } from "./schemas";
 
 export const friendsRouter = Router();
 
+type FriendLogRow = {
+  id: string;
+  user_id: string;
+  logged_at: string;
+  meal_type: string;
+  note: string | null;
+  image_uri: string | null;
+  source: string;
+  visibility: string;
+  calories: number;
+  protein_gram: number;
+  carbs_gram: number;
+  fat_gram: number;
+  fiber_gram: number | null;
+  sugar_gram: number | null;
+  sodium_mg: number | null;
+  items_json: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function mapFriendLogRow(row: FriendLogRow) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    loggedAt: row.logged_at,
+    mealType: row.meal_type,
+    note: row.note,
+    imageUri: row.image_uri,
+    source: row.source,
+    visibility: row.visibility,
+    calories: row.calories,
+    proteinGram: row.protein_gram,
+    carbsGram: row.carbs_gram,
+    fatGram: row.fat_gram,
+    fiberGram: row.fiber_gram,
+    sugarGram: row.sugar_gram,
+    sodiumMg: row.sodium_mg,
+    items: row.items_json ? JSON.parse(row.items_json) : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function withTransaction(fn: () => void) {
   db.exec("BEGIN");
   try {
@@ -36,6 +80,116 @@ friendsRouter.get("/", requireAuth, async (req, res) => {
   }));
 
   res.json({ friends });
+});
+
+friendsRouter.get("/:friendId/profile", requireAuth, async (req, res) => {
+  const userId = req.user!.id;
+  const friendId = String(req.params.friendId);
+
+  const isFriend = db
+    .prepare(
+      `SELECT id FROM friendships
+       WHERE (user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?)`,
+    )
+    .get(userId, friendId, friendId, userId) as { id: string } | undefined;
+
+  if (!isFriend) {
+    res.status(403).json({ message: "仅可查看好友详情" });
+    return;
+  }
+
+  const friend = db
+    .prepare(
+      `SELECT id, email, display_name, age, sex, activity_level, goal,
+              target_calories, target_protein_gram, target_carbs_gram, target_fat_gram
+       FROM users WHERE id = ?`,
+    )
+    .get(friendId) as
+    | {
+        id: string;
+        email: string;
+        display_name: string;
+        age: number | null;
+        sex: string | null;
+        activity_level: string | null;
+        goal: string | null;
+        target_calories: number | null;
+        target_protein_gram: number | null;
+        target_carbs_gram: number | null;
+        target_fat_gram: number | null;
+      }
+    | undefined;
+
+  if (!friend) {
+    res.status(404).json({ message: "好友不存在" });
+    return;
+  }
+
+  const parsedLimit = Number(req.query.limit ?? 20);
+  const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 50) : 20;
+  const parsedDays = Number(req.query.days ?? 30);
+  const days = Number.isFinite(parsedDays) ? Math.min(Math.max(parsedDays, 1), 90) : 30;
+
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  const startIso = startDate.toISOString();
+
+  const statsRow = db
+    .prepare(
+      `SELECT
+         COUNT(*) AS log_count,
+         COALESCE(SUM(calories), 0) AS calories_sum,
+         COALESCE(SUM(protein_gram), 0) AS protein_sum,
+         COALESCE(SUM(carbs_gram), 0) AS carbs_sum,
+         COALESCE(SUM(fat_gram), 0) AS fat_sum
+       FROM food_logs
+       WHERE user_id = ?
+         AND visibility IN ('FRIENDS', 'PUBLIC')
+         AND logged_at >= ?`,
+    )
+    .get(friendId, startIso) as {
+    log_count: number;
+    calories_sum: number;
+    protein_sum: number;
+    carbs_sum: number;
+    fat_sum: number;
+  };
+
+  const recentRows = db
+    .prepare(
+      `SELECT * FROM food_logs
+       WHERE user_id = ? AND visibility IN ('FRIENDS', 'PUBLIC')
+       ORDER BY logged_at DESC
+       LIMIT ?`,
+    )
+    .all(friendId, limit) as FriendLogRow[];
+
+  const recentLogs = recentRows.map((row) => mapFriendLogRow(row));
+
+  res.json({
+    friend: {
+      id: friend.id,
+      email: friend.email,
+      displayName: friend.display_name,
+      age: friend.age,
+      sex: friend.sex,
+      activityLevel: friend.activity_level,
+      goal: friend.goal,
+      targetCalories: friend.target_calories,
+      targetProteinGram: friend.target_protein_gram,
+      targetCarbsGram: friend.target_carbs_gram,
+      targetFatGram: friend.target_fat_gram,
+    },
+    stats: {
+      days,
+      logCount: Number(statsRow.log_count ?? 0),
+      caloriesSum: Number(statsRow.calories_sum ?? 0),
+      proteinSum: Number(statsRow.protein_sum ?? 0),
+      carbsSum: Number(statsRow.carbs_sum ?? 0),
+      fatSum: Number(statsRow.fat_sum ?? 0),
+    },
+    recentLogs,
+  });
 });
 
 friendsRouter.get("/requests", requireAuth, async (req, res) => {
