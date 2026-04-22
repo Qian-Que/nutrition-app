@@ -206,15 +206,25 @@ function normalizeErrorMessage(error: unknown) {
 }
 
 function isUnauthorizedError(error: unknown) {
-  if (error instanceof ApiRequestError && error.status === 401) {
-    return true;
+  if (error instanceof ApiRequestError) {
+    if (error.status === 401 || error.status === 403) {
+      return true;
+    }
+    if (error.status === 404 && error.message.includes("用户不存在")) {
+      return true;
+    }
   }
 
   if (!(error instanceof Error)) {
     return false;
   }
 
-  return error.message.includes("登录凭证") || error.message.includes("未授权") || error.message.includes("请重新登录");
+  return (
+    error.message.includes("登录凭证") ||
+    error.message.includes("未授权") ||
+    error.message.includes("请重新登录") ||
+    error.message.includes("用户不存在")
+  );
 }
 
 async function apiRequest<T>(
@@ -544,7 +554,15 @@ function AuthScreen({
   );
 }
 
-function DashboardScreen({ token, refreshKey }: { token: string; refreshKey: number }) {
+function DashboardScreen({
+  token,
+  refreshKey,
+  onAuthInvalid,
+}: {
+  token: string;
+  refreshKey: number;
+  onAuthInvalid: () => void;
+}) {
   const [logs, setLogs] = useState<FoodLog[]>([]);
   const [summary, setSummary] = useState({ calories: 0, proteinGram: 0, carbsGram: 0, fatGram: 0, fiberGram: 0 });
   const [dailyTarget, setDailyTarget] = useState<null | {
@@ -602,11 +620,15 @@ function DashboardScreen({ token, refreshKey }: { token: string; refreshKey: num
       setSummary(logPayload.summary);
       setDailyTarget(targetPayload.profile);
     } catch (error) {
+      if (isUnauthorizedError(error)) {
+        onAuthInvalid();
+        return;
+      }
       Alert.alert("加载失败", normalizeErrorMessage(error));
     } finally {
       setLoading(false);
     }
-  }, [selectedDate, token]);
+  }, [onAuthInvalid, selectedDate, token]);
 
   const loadCalendar = useCallback(async () => {
     setCalendarLoading(true);
@@ -622,11 +644,15 @@ function DashboardScreen({ token, refreshKey }: { token: string; refreshKey: num
       }
       setMonthStats(nextStats);
     } catch (error) {
+      if (isUnauthorizedError(error)) {
+        onAuthInvalid();
+        return;
+      }
       Alert.alert("加载日历失败", normalizeErrorMessage(error));
     } finally {
       setCalendarLoading(false);
     }
-  }, [selectedMonth, token]);
+  }, [onAuthInvalid, selectedMonth, token]);
 
   useEffect(() => {
     void load();
@@ -1574,7 +1600,7 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
         }}
       >
         <Tab.Screen name="记录">
-          {() => <DashboardScreen token={auth.token} refreshKey={refreshKey} />}
+          {() => <DashboardScreen token={auth.token} refreshKey={refreshKey} onAuthInvalid={onLogout} />}
         </Tab.Screen>
         <Tab.Screen name="识别">
           {() => <AnalyzeScreen token={auth.token} onSaved={() => setRefreshKey((prev) => prev + 1)} />}
