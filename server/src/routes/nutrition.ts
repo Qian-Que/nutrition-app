@@ -2,7 +2,7 @@
 import multer from "multer";
 
 import { requireAuth } from "../middleware/auth";
-import { analyzeFoodImage } from "../services/aiNutrition";
+import { analyzeFoodImage, analyzeFoodText } from "../services/aiNutrition";
 
 export const nutritionRouter = Router();
 
@@ -65,6 +65,28 @@ nutritionRouter.post("/analyze-image", requireAuth, upload.single("image"), asyn
     res.json({ analysis });
   } catch (error) {
     console.error("analyze-image failed:", error);
+    res.status(502).json({ message: normalizeAnalyzeErrorMessage(error) });
+  }
+});
+
+nutritionRouter.post("/analyze-text", requireAuth, async (req, res) => {
+  const description = typeof req.body?.description === "string" ? req.body.description.trim() : "";
+
+  if (!description) {
+    res.status(400).json({ message: "请提供文字描述" });
+    return;
+  }
+
+  if (description.length > 1000) {
+    res.status(400).json({ message: "文字描述过长，请控制在 1000 字以内" });
+    return;
+  }
+
+  try {
+    const analysis = await analyzeFoodText(description);
+    res.json({ analysis });
+  } catch (error) {
+    console.error("analyze-text failed:", error);
     res.status(502).json({ message: normalizeAnalyzeErrorMessage(error) });
   }
 });

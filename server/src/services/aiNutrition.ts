@@ -107,6 +107,18 @@ function buildPrompt() {
   ].join("\n");
 }
 
+function buildTextPrompt(description: string) {
+  return [
+    "你是营养师助手。用户会用文字描述这顿饭，请估算食物与营养。",
+    "请仅返回 JSON，不要输出任何解释文字。",
+    "JSON 必须包含 items/totals/confidence/notes 四个字段。",
+    "items 每项包含 name/calories/proteinGram/carbsGram/fatGram，可选 estimatedWeightGram/fiberGram。",
+    "totals 必须包含 calories/proteinGram/carbsGram/fatGram/fiberGram。",
+    "如果不确定，请在 notes 说明不确定点，并降低 confidence。",
+    `用户描述：${description}`,
+  ].join("\n");
+}
+
 async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -398,6 +410,102 @@ async function callChatCompletionsApi(params: {
   return outputText;
 }
 
+async function callResponsesApiText(params: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  prompt: string;
+  strictJsonSchema: boolean;
+}) {
+  const { baseUrl, apiKey, model, prompt, strictJsonSchema } = params;
+
+  const requestBody: Record<string, unknown> = {
+    model,
+    input: [
+      {
+        role: "user",
+        content: [{ type: "input_text", text: prompt }],
+      },
+    ],
+    max_output_tokens: 1000,
+  };
+
+  if (strictJsonSchema) {
+    requestBody.text = {
+      format: {
+        type: "json_schema",
+        name: "nutrition_analysis",
+        schema: outputSchema,
+        strict: true,
+      },
+    };
+  }
+
+  const payload = await fetchJsonWithTimeout(
+    `${baseUrl}/responses`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    },
+    config.aiTimeoutMs,
+  );
+
+  const outputText = extractTextOutputFromResponses(payload);
+  if (!outputText) {
+    throw new Error("AI 未返回有效内容");
+  }
+
+  return outputText;
+}
+
+async function callChatCompletionsApiText(params: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  prompt: string;
+}) {
+  const { baseUrl, apiKey, model, prompt } = params;
+
+  const payload = await fetchJsonWithTimeout(
+    `${baseUrl}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        max_tokens: 1000,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: "你是营养师助手。请只返回 JSON，不要返回任何多余文字。",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+      }),
+    },
+    config.aiTimeoutMs,
+  );
+
+  const outputText = extractTextOutputFromChatCompletions(payload);
+  if (!outputText) {
+    throw new Error("AI 未返回有效内容");
+  }
+
+  return outputText;
+}
+
 export async function analyzeFoodImage(base64Image: string, mimeType: string) {
   if (!config.aiApiKey) {
     return mockAnalysis();
@@ -459,6 +567,78 @@ export async function analyzeFoodImage(base64Image: string, mimeType: string) {
         prompt,
         imageDataUrl,
         imageDetail,
+      }).catch((chatError) => {
+        throw new Error(
+          `兼容模式调用失败。responses 错误：${(error as Error).message}；chat 错误：${(chatError as Error).message}`,
+        );
+      });
+    }
+  }
+
+  const jsonText = extractJsonText(rawText);
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    throw new Error("AI 返回结果不是有效 JSON");
+  }
+
+  return normalizeAnalysis(parsed);
+}
+
+export async function analyzeFoodText(description: string) {
+  if (!config.aiApiKey) {
+    return {
+      ...mockAnalysis(),
+      notes: "未配置 AI_API_KEY（或 OPENAI_API_KEY），当前为演示估算值。你也可以先记录文字描述。",
+    };
+  }
+
+  const provider = resolveProvider();
+  const baseUrl = normalizeBaseUrl(config.aiBaseUrl);
+  const prompt = buildTextPrompt(description);
+
+  let rawText: string;
+
+  if (provider === "openai") {
+    rawText = await callResponsesApiText({
+      baseUrl,
+      apiKey: config.aiApiKey,
+      model: config.aiModel,
+      prompt,
+      strictJsonSchema: true,
+    });
+  } else if (provider === "openai_compat_responses") {
+    rawText = await callResponsesApiText({
+      baseUrl,
+      apiKey: config.aiApiKey,
+      model: config.aiModel,
+      prompt,
+      strictJsonSchema: false,
+    });
+  } else if (provider === "openai_compat_chat") {
+    rawText = await callChatCompletionsApiText({
+      baseUrl,
+      apiKey: config.aiApiKey,
+      model: config.aiModel,
+      prompt,
+    });
+  } else {
+    try {
+      rawText = await callResponsesApiText({
+        baseUrl,
+        apiKey: config.aiApiKey,
+        model: config.aiModel,
+        prompt,
+        strictJsonSchema: false,
+      });
+    } catch (error) {
+      rawText = await callChatCompletionsApiText({
+        baseUrl,
+        apiKey: config.aiApiKey,
+        model: config.aiModel,
+        prompt,
       }).catch((chatError) => {
         throw new Error(
           `兼容模式调用失败。responses 错误：${(error as Error).message}；chat 错误：${(chatError as Error).message}`,

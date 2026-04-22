@@ -116,6 +116,7 @@ type Sex = "MALE" | "FEMALE";
 type ActivityLevel = "SEDENTARY" | "LIGHT" | "MODERATE" | "ACTIVE" | "VERY_ACTIVE";
 type Goal = "LOSE_WEIGHT" | "MAINTAIN" | "GAIN_MUSCLE";
 type GroupRole = "OWNER" | "ADMIN" | "MEMBER";
+type AnalyzeMode = "IMAGE" | "TEXT";
 
 type Option<T extends string> = {
   label: string;
@@ -170,6 +171,11 @@ class ApiRequestError extends Error {
   }
 }
 
+const analyzeModeOptions: ReadonlyArray<Option<AnalyzeMode>> = [
+  { label: "图片识别", value: "IMAGE" },
+  { label: "文字估算", value: "TEXT" },
+];
+
 function formatMealType(value: MealType | string) {
   const found = mealOptions.find((option) => option.value === value);
   return found?.label ?? value;
@@ -182,6 +188,35 @@ function formatVisibility(value: Visibility | string) {
 
 function formatRole(value: GroupRole | string) {
   return roleLabelMap[value as GroupRole] ?? value;
+}
+
+function extractFoodNames(items: unknown): string[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item) => {
+      if (item && typeof item === "object" && "name" in item) {
+        const name = (item as { name?: unknown }).name;
+        return typeof name === "string" ? name.trim() : "";
+      }
+      return "";
+    })
+    .filter((name) => name.length > 0);
+}
+
+function summarizeFoodFromLog(log: FoodLog): string {
+  const names = extractFoodNames(log.items);
+  if (names.length > 0) {
+    return names.join("、");
+  }
+
+  if (typeof log.note === "string" && log.note.trim().length > 0) {
+    return log.note.trim();
+  }
+
+  return "未填写";
 }
 
 function normalizeErrorMessage(error: unknown) {
@@ -581,6 +616,7 @@ function DashboardScreen({
   const [protein, setProtein] = useState("");
   const [carbs, setCarbs] = useState("");
   const [fat, setFat] = useState("");
+  const [manualFoodText, setManualFoodText] = useState("");
   const [mealType, setMealType] = useState<MealType>("LUNCH");
   const [manualVisibility, setManualVisibility] = useState<Visibility>("PRIVATE");
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
@@ -593,6 +629,7 @@ function DashboardScreen({
     setEditingLoggedAt(null);
     setMealType("LUNCH");
     setManualVisibility("PRIVATE");
+    setManualFoodText("");
     setCalories("");
     setProtein("");
     setCarbs("");
@@ -689,6 +726,17 @@ function DashboardScreen({
       return;
     }
 
+    if (!manualFoodText.trim()) {
+      Alert.alert("提示", "请填写本次吃了什么。");
+      return;
+    }
+
+    const manualItems = manualFoodText
+      .split(/[\n,，;；、]/)
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0)
+      .map((name) => ({ name }));
+
     try {
       const loggedAt = editingLoggedAt ?? new Date(`${selectedDate}T12:00:00`).toISOString();
       const path = editingLogId ? `/api/logs/${editingLogId}` : "/api/logs";
@@ -703,10 +751,12 @@ function DashboardScreen({
             mealType,
             source: editingLogId ? editingSource : "MANUAL",
             visibility: manualVisibility,
+            note: manualFoodText.trim(),
             calories: Number(calories),
             proteinGram: Number(protein),
             carbsGram: Number(carbs),
             fatGram: Number(fat),
+            items: manualItems,
           }),
         },
         token,
@@ -726,6 +776,7 @@ function DashboardScreen({
     fat,
     load,
     loadCalendar,
+    manualFoodText,
     manualVisibility,
     mealType,
     protein,
@@ -740,6 +791,7 @@ function DashboardScreen({
     setEditingLoggedAt(item.loggedAt);
     setMealType(item.mealType);
     setManualVisibility(item.visibility);
+    setManualFoodText(summarizeFoodFromLog(item));
     setCalories(String(item.calories));
     setProtein(String(item.proteinGram));
     setCarbs(String(item.carbsGram));
@@ -881,6 +933,13 @@ function DashboardScreen({
           <Text style={styles.cardTitle}>{editingLogId ? "编辑记录" : "手动添加记录"}</Text>
           <OptionRow label="餐次" options={mealOptions} value={mealType} onChange={setMealType} />
           <OptionRow label="可见范围" options={visibilityOptions} value={manualVisibility} onChange={setManualVisibility} />
+          <TextInput
+            style={styles.input}
+            value={manualFoodText}
+            onChangeText={setManualFoodText}
+            placeholder="吃了什么（如：鸡胸肉200g、米饭一碗、青菜）"
+            placeholderTextColor="#8992a3"
+          />
           <NumberInput value={calories} onChangeText={setCalories} placeholder="热量（千卡）" />
           <NumberInput value={protein} onChangeText={setProtein} placeholder="蛋白质（g）" />
           <NumberInput value={carbs} onChangeText={setCarbs} placeholder="碳水（g）" />
@@ -914,6 +973,7 @@ function DashboardScreen({
               <Text style={styles.logSub}>
                 蛋白质 {item.proteinGram}g / 碳水 {item.carbsGram}g / 脂肪 {item.fatGram}g
               </Text>
+              <Text style={styles.logSub}>吃了：{summarizeFoodFromLog(item)}</Text>
               <Text style={styles.logSub}>来源：{item.source === "AI" ? "智能识别" : "手动录入"}</Text>
               <Text style={styles.logSub}>可见范围：{formatVisibility(item.visibility)}</Text>
               <Text style={styles.logSub}>{new Date(item.loggedAt).toLocaleString()}</Text>
@@ -939,6 +999,9 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
   const [loading, setLoading] = useState(false);
   const [mealType, setMealType] = useState<MealType>("LUNCH");
   const [visibility, setVisibility] = useState<Visibility>("PRIVATE");
+  const [analyzeMode, setAnalyzeMode] = useState<AnalyzeMode>("IMAGE");
+  const [textDescription, setTextDescription] = useState("");
+  const [textSourceNote, setTextSourceNote] = useState("");
 
   const handleImagePick = useCallback(
     async (mode: "camera" | "library") => {
@@ -978,6 +1041,7 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
       setLoading(true);
       setImageUri(asset.uri);
       setAnalysis(null);
+      setTextSourceNote("");
 
       try {
         const payload = await apiRequest<{ analysis: NutritionAnalysis }>(
@@ -1002,10 +1066,46 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
     [token],
   );
 
+  const handleTextAnalyze = useCallback(async () => {
+    const description = textDescription.trim();
+    if (!description) {
+      Alert.alert("提示", "请先输入本次饮食文字描述。");
+      return;
+    }
+
+    setLoading(true);
+    setImageUri(null);
+    setAnalysis(null);
+    setTextSourceNote(description);
+
+    try {
+      const payload = await apiRequest<{ analysis: NutritionAnalysis }>(
+        "/api/nutrition/analyze-text",
+        {
+          method: "POST",
+          body: JSON.stringify({ description }),
+        },
+        token,
+        { timeoutMs: 90000 },
+      );
+      setAnalysis(payload.analysis);
+    } catch (error) {
+      Alert.alert("识别失败", normalizeErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, [textDescription, token]);
+
   const saveAnalysis = useCallback(async () => {
     if (!analysis) {
       return;
     }
+
+    const itemNames = analysis.items.map((item) => item.name?.trim()).filter((name) => Boolean(name)) as string[];
+    const noteParts = [itemNames.length > 0 ? `吃了：${itemNames.join("、")}` : "", textSourceNote ? `描述：${textSourceNote}` : ""]
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+    const mergedNote = noteParts.length > 0 ? noteParts.join("；") : undefined;
 
     setLoading(true);
     try {
@@ -1018,6 +1118,7 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
             source: "AI",
             visibility,
             imageUri: imageUri ?? undefined,
+            note: mergedNote,
             calories: Number(analysis.totals.calories.toFixed(1)),
             proteinGram: Number(analysis.totals.proteinGram.toFixed(1)),
             carbsGram: Number(analysis.totals.carbsGram.toFixed(1)),
@@ -1035,26 +1136,44 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
     } finally {
       setLoading(false);
     }
-  }, [analysis, imageUri, mealType, onSaved, token, visibility]);
+  }, [analysis, imageUri, mealType, onSaved, textSourceNote, token, visibility]);
 
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.screenContainer}>
-        <Text style={styles.screenTitle}>拍照识别</Text>
+        <Text style={styles.screenTitle}>智能识别</Text>
         <View style={styles.card}>
-          <Text style={styles.hint}>说明：除图片识别外，也可在“记录”页手动添加，并通过文字描述食物来估算热量和营养。</Text>
+          <Text style={styles.hint}>说明：支持图片识别和文字描述两种 AI 估算方式，识别后可直接保存为每日记录。</Text>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>上传方式</Text>
-          <View style={styles.rowGap}>
-            <Pressable style={styles.primaryButton} onPress={() => void handleImagePick("camera")}>
-              <Text style={styles.primaryButtonText}>拍照识别</Text>
-            </Pressable>
-            <Pressable style={styles.secondaryButton} onPress={() => void handleImagePick("library")}>
-              <Text style={styles.secondaryButtonText}>从相册选择</Text>
-            </Pressable>
-          </View>
+          <Text style={styles.cardTitle}>识别方式</Text>
+          <OptionRow label="方式" options={analyzeModeOptions} value={analyzeMode} onChange={setAnalyzeMode} />
+
+          {analyzeMode === "IMAGE" ? (
+            <View style={styles.rowGap}>
+              <Pressable style={styles.primaryButton} onPress={() => void handleImagePick("camera")}>
+                <Text style={styles.primaryButtonText}>拍照识别</Text>
+              </Pressable>
+              <Pressable style={styles.secondaryButton} onPress={() => void handleImagePick("library")}>
+                <Text style={styles.secondaryButtonText}>从相册选择</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <TextInput
+                style={styles.textareaInput}
+                value={textDescription}
+                onChangeText={setTextDescription}
+                placeholder="请输入饮食描述，例如：午餐吃了150g鸡胸肉、1碗米饭、半份西兰花"
+                placeholderTextColor="#8992a3"
+                multiline
+              />
+              <Pressable style={styles.primaryButton} onPress={() => void handleTextAnalyze()}>
+                <Text style={styles.primaryButtonText}>文字估算</Text>
+              </Pressable>
+            </>
+          )}
         </View>
 
         {imageUri ? (
@@ -1076,6 +1195,7 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
             <Text style={styles.metric}>膳食纤维：{analysis.totals.fiberGram.toFixed(1)} g</Text>
             <Text style={styles.hint}>置信度：{(analysis.confidence * 100).toFixed(0)}%</Text>
             <Text style={styles.hint}>{analysis.notes}</Text>
+            {textSourceNote ? <Text style={styles.hint}>本次描述：{textSourceNote}</Text> : null}
 
             <OptionRow label="餐次" options={mealOptions} value={mealType} onChange={setMealType} />
             <OptionRow label="可见范围" options={visibilityOptions} value={visibility} onChange={setVisibility} />
@@ -1748,6 +1868,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 11,
     marginTop: 8,
+  },
+  textareaInput: {
+    backgroundColor: "#0f1a2f",
+    color: "#e8edfb",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#273245",
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    marginTop: 8,
+    minHeight: 88,
+    textAlignVertical: "top",
   },
   primaryButton: {
     backgroundColor: "#2667ff",
