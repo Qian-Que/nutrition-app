@@ -1041,6 +1041,9 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.screenContainer}>
         <Text style={styles.screenTitle}>拍照识别</Text>
+        <View style={styles.card}>
+          <Text style={styles.hint}>说明：除图片识别外，也可在“记录”页手动添加，并通过文字描述食物来估算热量和营养。</Text>
+        </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>上传方式</Text>
