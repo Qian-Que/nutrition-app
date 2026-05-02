@@ -24,7 +24,7 @@ const API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v2";
 const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-05-02-r10";
+const APP_BUILD_LABEL = "2026-05-02-r11";
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
 const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS ?? 140000);
@@ -3286,6 +3286,10 @@ function WeightTrackerScreen({ token }: { token: string }) {
         setWeight(String(payload.latest.weightKg));
       }
     } catch (error) {
+      if (isEndpointNotFound(error)) {
+        setLogs([]);
+        return;
+      }
       Alert.alert("加载体重失败", normalizeErrorMessage(error));
     } finally {
       setLoading(false);
@@ -3321,6 +3325,13 @@ function WeightTrackerScreen({ token }: { token: string }) {
       await loadWeights();
       Alert.alert("已保存", "体重已记录，并会用于更新每日目标。");
     } catch (error) {
+      if (isEndpointNotFound(error)) {
+        Alert.alert(
+          "后端未升级",
+          "当前后端还没有体重追踪接口。请在 Railway 部署最新 GitHub 提交后再保存体重。",
+        );
+        return;
+      }
       Alert.alert("保存失败", normalizeErrorMessage(error));
     } finally {
       setSaving(false);
