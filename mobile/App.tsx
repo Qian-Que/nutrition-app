@@ -24,7 +24,7 @@ const API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v2";
 const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-05-02-r11";
+const APP_BUILD_LABEL = "2026-05-02-r12";
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
 const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS ?? 140000);
@@ -326,6 +326,12 @@ const visibilityOptions: ReadonlyArray<Option<Visibility>> = [
   { label: "仅自己可见", value: "PRIVATE" },
   { label: "好友可见", value: "FRIENDS" },
   { label: "公开", value: "PUBLIC" },
+];
+
+const exerciseIntensityOptions: ReadonlyArray<Option<ExerciseIntensity>> = [
+  { label: "低强度", value: "LOW" },
+  { label: "中等强度", value: "MODERATE" },
+  { label: "高强度", value: "HIGH" },
 ];
 
 const sexOptions: ReadonlyArray<Option<Sex>> = [
@@ -1849,6 +1855,17 @@ function DashboardScreen({
   const [editTime, setEditTime] = useState('');
   const [editVisibility, setEditVisibility] = useState<Visibility>('PRIVATE');
   const [savingEdit, setSavingEdit] = useState(false);
+  const [editExerciseId, setEditExerciseId] = useState<string | null>(null);
+  const [editExerciseType, setEditExerciseType] = useState('');
+  const [editExerciseNote, setEditExerciseNote] = useState('');
+  const [editExerciseDuration, setEditExerciseDuration] = useState('');
+  const [editExerciseCalories, setEditExerciseCalories] = useState('');
+  const [editExerciseMet, setEditExerciseMet] = useState('');
+  const [editExerciseDate, setEditExerciseDate] = useState('');
+  const [editExerciseTime, setEditExerciseTime] = useState('');
+  const [editExerciseIntensity, setEditExerciseIntensity] = useState<ExerciseIntensity>('MODERATE');
+  const [editExerciseVisibility, setEditExerciseVisibility] = useState<Visibility>('PRIVATE');
+  const [savingExerciseEdit, setSavingExerciseEdit] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -1928,6 +1945,19 @@ function DashboardScreen({
     setEditDate('');
     setEditTime('');
     setEditVisibility('PRIVATE');
+  }, []);
+
+  const resetExerciseEditState = useCallback(() => {
+    setEditExerciseId(null);
+    setEditExerciseType('');
+    setEditExerciseNote('');
+    setEditExerciseDuration('');
+    setEditExerciseCalories('');
+    setEditExerciseMet('');
+    setEditExerciseDate('');
+    setEditExerciseTime('');
+    setEditExerciseIntensity('MODERATE');
+    setEditExerciseVisibility('PRIVATE');
   }, []);
 
   const load = useCallback(async () => {
@@ -2081,12 +2111,85 @@ function DashboardScreen({
     [deleteLogRecord, openEditLogModal],
   );
 
+  const openEditExerciseModal = useCallback((exercise: ExerciseLog) => {
+    const nextIntensity: ExerciseIntensity =
+      exercise.intensity === 'LOW' || exercise.intensity === 'HIGH' || exercise.intensity === 'MODERATE'
+        ? exercise.intensity
+        : 'MODERATE';
+    const nextVisibility: Visibility =
+      exercise.visibility === 'FRIENDS' || exercise.visibility === 'PUBLIC' || exercise.visibility === 'PRIVATE'
+        ? exercise.visibility
+        : 'PRIVATE';
+    setEditExerciseId(exercise.id);
+    setEditExerciseType(exercise.exerciseType || '运动');
+    setEditExerciseNote(exercise.note?.trim() ?? '');
+    setEditExerciseDuration(String(Number(exercise.durationMin ?? 0)));
+    setEditExerciseCalories(String(Number(exercise.calories ?? 0)));
+    setEditExerciseMet(String(Number(exercise.met ?? 1)));
+    setEditExerciseDate(toLocalDateInput(exercise.loggedAt));
+    setEditExerciseTime(toLocalTimeInput(exercise.loggedAt));
+    setEditExerciseIntensity(nextIntensity);
+    setEditExerciseVisibility(nextVisibility);
+  }, []);
+
+  const deleteExerciseRecord = useCallback(
+    async (exercise: ExerciseLog) => {
+      try {
+        await apiRequest(
+          `/api/exercises/${exercise.id}`,
+          {
+            method: 'DELETE',
+          },
+          token,
+        );
+        if (editExerciseId === exercise.id) {
+          resetExerciseEditState();
+        }
+        await load();
+      } catch (error) {
+        if (isUnauthorizedError(error)) {
+          onAuthInvalid();
+          return;
+        }
+        Alert.alert('删除失败', normalizeErrorMessage(error));
+      }
+    },
+    [editExerciseId, load, onAuthInvalid, resetExerciseEditState, token],
+  );
+
+  const openExerciseMoreActions = useCallback(
+    (exercise: ExerciseLog) => {
+      Alert.alert('更多操作', exercise.exerciseType || '运动记录', [
+        { text: '取消', style: 'cancel' },
+        { text: '编辑运动', onPress: () => openEditExerciseModal(exercise) },
+        {
+          text: '删除',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert('确认删除', '删除后无法恢复，确定要删除这条运动记录吗？', [
+              { text: '取消', style: 'cancel' },
+              { text: '删除', style: 'destructive', onPress: () => void deleteExerciseRecord(exercise) },
+            ]);
+          },
+        },
+      ]);
+    },
+    [deleteExerciseRecord, openEditExerciseModal],
+  );
+
   const closeEditModal = useCallback(() => {
     if (savingEdit) {
       return;
     }
     resetEditState();
   }, [resetEditState, savingEdit]);
+
+  const closeExerciseEditModal = useCallback(() => {
+    if (savingExerciseEdit) {
+      return;
+    }
+    resetExerciseEditState();
+  }, [resetExerciseEditState, savingExerciseEdit]);
 
   const saveEditedLog = useCallback(async () => {
     if (!editLogId) {
@@ -2167,6 +2270,95 @@ function DashboardScreen({
     logs,
     onAuthInvalid,
     resetEditState,
+    selectedDate,
+    token,
+  ]);
+
+  const saveEditedExercise = useCallback(async () => {
+    if (!editExerciseId) {
+      return;
+    }
+    const targetExercise = exercises.find((item) => item.id === editExerciseId);
+    if (!targetExercise) {
+      Alert.alert('提示', '运动记录不存在，请刷新后重试。');
+      resetExerciseEditState();
+      return;
+    }
+
+    const toNumberOr = (raw: string, fallback: number) => {
+      const normalized = raw.trim().replace(',', '.');
+      const value = Number(normalized);
+      return Number.isFinite(value) ? value : fallback;
+    };
+
+    const nextExerciseType = editExerciseType.trim() || targetExercise.exerciseType || '运动';
+    const nextDuration = Number(toNumberOr(editExerciseDuration, Number(targetExercise.durationMin ?? 1)).toFixed(1));
+    const nextCalories = Number(toNumberOr(editExerciseCalories, Number(targetExercise.calories ?? 0)).toFixed(1));
+    const nextMet = Number(toNumberOr(editExerciseMet, Number(targetExercise.met ?? 1)).toFixed(1));
+
+    if (nextDuration < 1) {
+      Alert.alert('提示', '运动时长至少 1 分钟。');
+      return;
+    }
+    if (nextMet < 1) {
+      Alert.alert('提示', 'MET 至少为 1。');
+      return;
+    }
+
+    setSavingExerciseEdit(true);
+    try {
+      const nextLoggedAt = mergeDateAndTimeToIso(editExerciseDate, editExerciseTime, targetExercise.loggedAt);
+      const nextSelectedDate = toLogDate(nextLoggedAt);
+      await apiRequest(
+        `/api/exercises/${targetExercise.id}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            loggedAt: nextLoggedAt,
+            exerciseType: nextExerciseType,
+            durationMin: nextDuration,
+            intensity: editExerciseIntensity,
+            met: nextMet,
+            calories: nextCalories,
+            note: editExerciseNote.trim() || undefined,
+            source: targetExercise.source,
+            visibility: editExerciseVisibility,
+          }),
+        },
+        token,
+      );
+
+      resetExerciseEditState();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(nextSelectedDate) && nextSelectedDate !== selectedDate) {
+        setSelectedDate(nextSelectedDate);
+        setSelectedMonth(toMonthString(nextSelectedDate));
+      } else {
+        await load();
+      }
+    } catch (error) {
+      if (isUnauthorizedError(error)) {
+        onAuthInvalid();
+        return;
+      }
+      Alert.alert('保存失败', normalizeErrorMessage(error));
+    } finally {
+      setSavingExerciseEdit(false);
+    }
+  }, [
+    editExerciseCalories,
+    editExerciseDate,
+    editExerciseDuration,
+    editExerciseId,
+    editExerciseIntensity,
+    editExerciseMet,
+    editExerciseNote,
+    editExerciseTime,
+    editExerciseType,
+    editExerciseVisibility,
+    exercises,
+    load,
+    onAuthInvalid,
+    resetExerciseEditState,
     selectedDate,
     token,
   ]);
@@ -2682,7 +2874,14 @@ function DashboardScreen({
                   </View>
                   <View style={styles.journalEntryFooter}>
                     <Text style={styles.journalEntryTime}>{formatClockTime(exercise.loggedAt)}</Text>
-                    <Text style={styles.journalEntryActionText}>运动会增加当日剩余热量</Text>
+                    <View style={styles.journalEntryActions}>
+                      <Pressable style={styles.journalEntryActionButton} onPress={() => openEditExerciseModal(exercise)}>
+                        <Text style={styles.journalEntryActionText}>编辑</Text>
+                      </Pressable>
+                      <Pressable style={styles.journalEntryActionButton} onPress={() => openExerciseMoreActions(exercise)}>
+                        <Text style={styles.journalEntryActionText}>更多</Text>
+                      </Pressable>
+                    </View>
                   </View>
                 </View>
               );
@@ -2829,6 +3028,92 @@ function DashboardScreen({
                 </Pressable>
                 <Pressable style={styles.primaryButton} onPress={() => void saveEditedLog()} disabled={savingEdit}>
                   <Text style={styles.primaryButtonText}>{savingEdit ? '保存中...' : '保存修改'}</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={Boolean(editExerciseId)} transparent animationType='fade' onRequestClose={closeExerciseEditModal}>
+          <View style={styles.journalEditModalMask}>
+            <View style={styles.journalEditModalCard}>
+              <Text style={styles.journalEditModalTitle}>编辑运动</Text>
+
+              <TextInput
+                style={[styles.input, styles.journalEditInput]}
+                value={editExerciseType}
+                onChangeText={setEditExerciseType}
+                placeholder='运动类型，例如跑步、力量训练'
+                placeholderTextColor='#8f9bb0'
+              />
+
+              <TextInput
+                style={[styles.input, styles.journalEditInput]}
+                value={editExerciseNote}
+                onChangeText={setEditExerciseNote}
+                placeholder='备注（可选）'
+                placeholderTextColor='#8f9bb0'
+                multiline
+              />
+
+              <View style={styles.journalEditGrid}>
+                <TextInput
+                  style={[styles.input, styles.journalEditInput]}
+                  value={editExerciseDate}
+                  onChangeText={setEditExerciseDate}
+                  placeholder='日期 YYYY-MM-DD'
+                  placeholderTextColor='#8f9bb0'
+                />
+                <TextInput
+                  style={[styles.input, styles.journalEditInput]}
+                  value={editExerciseTime}
+                  onChangeText={setEditExerciseTime}
+                  placeholder='时间 HH:mm'
+                  placeholderTextColor='#8f9bb0'
+                />
+              </View>
+
+              <View style={styles.journalEditGrid}>
+                <TextInput
+                  style={[styles.input, styles.journalEditInput]}
+                  value={editExerciseDuration}
+                  onChangeText={setEditExerciseDuration}
+                  keyboardType='decimal-pad'
+                  placeholder='时长(分钟)'
+                  placeholderTextColor='#8f9bb0'
+                />
+                <TextInput
+                  style={[styles.input, styles.journalEditInput]}
+                  value={editExerciseCalories}
+                  onChangeText={setEditExerciseCalories}
+                  keyboardType='decimal-pad'
+                  placeholder='消耗(千卡)'
+                  placeholderTextColor='#8f9bb0'
+                />
+                <TextInput
+                  style={[styles.input, styles.journalEditInput]}
+                  value={editExerciseMet}
+                  onChangeText={setEditExerciseMet}
+                  keyboardType='decimal-pad'
+                  placeholder='MET'
+                  placeholderTextColor='#8f9bb0'
+                />
+              </View>
+
+              <OptionRow
+                label='强度'
+                options={exerciseIntensityOptions}
+                value={editExerciseIntensity}
+                onChange={setEditExerciseIntensity}
+              />
+              <OptionRow label='可见范围' options={visibilityOptions} value={editExerciseVisibility} onChange={setEditExerciseVisibility} />
+
+              <View style={styles.rowGap}>
+                <Pressable style={styles.secondaryButton} onPress={closeExerciseEditModal} disabled={savingExerciseEdit}>
+                  <Text style={styles.secondaryButtonText}>取消</Text>
+                </Pressable>
+                <Pressable style={styles.primaryButton} onPress={() => void saveEditedExercise()} disabled={savingExerciseEdit}>
+                  <Text style={styles.primaryButtonText}>{savingExerciseEdit ? '保存中...' : '保存修改'}</Text>
                 </Pressable>
               </View>
             </View>
