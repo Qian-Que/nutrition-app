@@ -24,7 +24,7 @@ const API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v2";
 const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-05-02-r12";
+const APP_BUILD_LABEL = "2026-05-02-r13";
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
 const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS ?? 140000);
@@ -1014,6 +1014,27 @@ function formatIU(value: number | null | undefined) {
   return `${Math.round(Number(value))}IU`;
 }
 
+function formatKcal(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "-";
+  }
+  return `${Math.round(Number(value))} 千卡`;
+}
+
+function formatSignedKcalChange(value: number | null) {
+  if (value === null || Number.isNaN(Number(value))) {
+    return "较前日 - 千卡";
+  }
+  const rounded = Math.round(Number(value));
+  if (rounded > 0) {
+    return `较前日 +${rounded} 千卡`;
+  }
+  if (rounded < 0) {
+    return `较前日 ${rounded} 千卡`;
+  }
+  return "较前日 0 千卡";
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
@@ -1437,6 +1458,82 @@ function buildHealthAnalysis(log: FoodLog, target?: { targetCalories: number | n
   return `${points.join(" ")} 以上为基于图片/文字和常见食物数据库的估算，不替代医疗建议；如有疾病、孕期或特殊饮食需求，应按医生或营养师方案执行。`;
 }
 
+function buildExerciseHealthAnalysis(
+  exercise: ExerciseLog,
+  context: {
+    foodSummary: { calories: number; proteinGram: number; carbsGram: number; fatGram: number; fiberGram: number };
+    exerciseSummary: { calories: number; durationMin: number };
+    target?: {
+      targetCalories: number | null;
+      targetProteinGram: number | null;
+      targetCarbsGram: number | null;
+      targetFatGram: number | null;
+    } | null;
+  },
+) {
+  const calories = Math.max(0, Number(exercise.calories ?? 0));
+  const duration = Math.max(0, Number(exercise.durationMin ?? 0));
+  const met = Math.max(1, Number(exercise.met ?? 1));
+  const totalExerciseCalories = Math.max(0, Number(context.exerciseSummary.calories ?? 0));
+  const totalExerciseDuration = Math.max(0, Number(context.exerciseSummary.durationMin ?? 0));
+  const foodCalories = Math.max(0, Number(context.foodSummary.calories ?? 0));
+  const netCalories = Math.round(foodCalories - totalExerciseCalories);
+  const targetCalories = Number(context.target?.targetCalories ?? 0);
+  const points: string[] = [];
+
+  points.push(
+    `这次${exercise.exerciseType || "运动"}估算消耗 ${Math.round(calories)} 千卡，时长约 ${Math.round(duration)} 分钟，强度为${formatIntensity(
+      exercise.intensity,
+    )}，MET 约 ${roundTo(met, 1)}。`,
+  );
+
+  if (totalExerciseCalories > 0) {
+    const share = clamp((calories / totalExerciseCalories) * 100, 0, 100);
+    points.push(`它约占今天运动消耗的 ${share.toFixed(0)}%，今日累计运动 ${Math.round(totalExerciseDuration)} 分钟。`);
+  }
+
+  if (targetCalories > 0) {
+    const remain = Math.round(targetCalories - netCalories);
+    points.push(
+      `结合今天已记录饮食与运动，当前净摄入约 ${netCalories} 千卡，距离今日目标${remain >= 0 ? `还剩 ${remain}` : `已超出 ${Math.abs(remain)}`} 千卡。`,
+    );
+    if (remain > 650) {
+      points.push("当前热量缺口较大，若不是刻意安排低热量日，建议补充一餐含优质蛋白、复合碳水和蔬菜的正餐，避免长期过低摄入影响恢复。");
+    } else if (remain < -350) {
+      points.push("当前净摄入已明显高于目标，后续可优先选择低油、高蛋白和高纤维食物，并把额外运动作为辅助而不是抵消进食的主要手段。");
+    } else {
+      points.push("当前净摄入与目标距离较可控，可根据饥饿感和训练恢复安排后续饮食。");
+    }
+  }
+
+  const proteinTarget = Number(context.target?.targetProteinGram ?? 0);
+  if (proteinTarget > 0) {
+    const proteinRatio = context.foodSummary.proteinGram / proteinTarget;
+    if (proteinRatio < 0.55 && calories >= 150) {
+      points.push("蛋白质完成度偏低，运动后可补充鸡蛋、鱼虾、瘦肉、豆制品或奶类，帮助肌肉修复和维持饱腹感。");
+    } else if (proteinRatio >= 0.8) {
+      points.push("今天蛋白质完成度较好，有利于训练恢复和体重管理。");
+    }
+  }
+
+  const carbsTarget = Number(context.target?.targetCarbsGram ?? 0);
+  if (carbsTarget > 0 && calories >= 250 && context.foodSummary.carbsGram / carbsTarget < 0.35) {
+    points.push("运动消耗较高且碳水完成度偏低时，可适量补充米饭、土豆、燕麦或水果，帮助恢复糖原并降低疲劳感。");
+  }
+
+  if (duration >= 45 || calories >= 350) {
+    points.push("本次运动量较大，注意补水；如果大量出汗，可适量补充电解质，尤其在高温或长时间有氧后。");
+  }
+
+  if (/(力量|健身|撸铁|深蹲|卧推|硬拉|训练|strength|gym|lift|weight)/i.test(exercise.exerciseType)) {
+    points.push("力量训练后建议保证睡眠和蛋白质摄入，并给同一肌群留出恢复时间。");
+  } else if (/(跑|骑|游|快走|有氧|run|bike|cycling|swim|walk|cardio)/i.test(exercise.exerciseType)) {
+    points.push("有氧训练对心肺和能量消耗有帮助，若频率较高，应关注膝踝或肩部等重复负荷部位的恢复。");
+  }
+
+  return `${points.join(" ")} 运动消耗基于运动类型、时长、强度和常见 MET 估算，实际值会受体重、心率、动作质量和设备误差影响。`;
+}
+
 function NumberInput({
   value,
   onChangeText,
@@ -1822,6 +1919,7 @@ function DashboardScreen({
   const [summary, setSummary] = useState({ calories: 0, proteinGram: 0, carbsGram: 0, fatGram: 0, fiberGram: 0 });
   const [exercises, setExercises] = useState<ExerciseLog[]>([]);
   const [exerciseSummary, setExerciseSummary] = useState({ calories: 0, durationMin: 0 });
+  const [previousDayNetCalories, setPreviousDayNetCalories] = useState<number | null>(null);
   const [dailyTarget, setDailyTarget] = useState<null | {
     targetCalories: number | null;
     targetProteinGram: number | null;
@@ -1844,6 +1942,7 @@ function DashboardScreen({
   const [conversationImageMimeType, setConversationImageMimeType] = useState('image/jpeg');
   const [conversationVisibility, setConversationVisibility] = useState<Visibility>('PRIVATE');
   const [detailLogId, setDetailLogId] = useState<string | null>(null);
+  const [detailExerciseId, setDetailExerciseId] = useState<string | null>(null);
   const [editLogId, setEditLogId] = useState<string | null>(null);
   const [editNote, setEditNote] = useState('');
   const [editCalories, setEditCalories] = useState('');
@@ -2002,11 +2101,45 @@ function DashboardScreen({
         }
       }
 
+      let nextPreviousDayNetCalories: number | null = null;
+      const previousDate = shiftDateString(selectedDate, -1);
+      try {
+        const previousLogPayload = await apiRequest<{
+          logs: FoodLog[];
+          summary: { calories: number; proteinGram: number; carbsGram: number; fatGram: number; fiberGram: number };
+        }>(`/api/logs?date=${previousDate}`, {}, token);
+
+        let previousExerciseCalories = 0;
+        try {
+          const previousExercisePayload = await apiRequest<{
+            exercises: ExerciseLog[];
+            summary: { calories: number; durationMin: number };
+          }>(`/api/exercises?date=${previousDate}`, {}, token);
+          previousExerciseCalories = Number(previousExercisePayload.summary.calories ?? 0);
+        } catch (previousExerciseError) {
+          if (isUnauthorizedError(previousExerciseError)) {
+            onAuthInvalid();
+            return;
+          }
+          if (!isEndpointNotFound(previousExerciseError)) {
+            throw previousExerciseError;
+          }
+        }
+        nextPreviousDayNetCalories = Math.round(Number(previousLogPayload.summary.calories ?? 0) - previousExerciseCalories);
+      } catch (previousDayError) {
+        if (isUnauthorizedError(previousDayError)) {
+          onAuthInvalid();
+          return;
+        }
+        nextPreviousDayNetCalories = null;
+      }
+
       setLogs(logPayload.logs);
       setSummary(logPayload.summary);
       setExercises(exercisePayload.exercises);
       setExerciseSummary(exercisePayload.summary);
       setDailyTarget(targetPayload.profile);
+      setPreviousDayNetCalories(nextPreviousDayNetCalories);
     } catch (error) {
       if (isUnauthorizedError(error)) {
         onAuthInvalid();
@@ -2145,6 +2278,9 @@ function DashboardScreen({
         if (editExerciseId === exercise.id) {
           resetExerciseEditState();
         }
+        if (detailExerciseId === exercise.id) {
+          setDetailExerciseId(null);
+        }
         await load();
       } catch (error) {
         if (isUnauthorizedError(error)) {
@@ -2154,7 +2290,7 @@ function DashboardScreen({
         Alert.alert('删除失败', normalizeErrorMessage(error));
       }
     },
-    [editExerciseId, load, onAuthInvalid, resetExerciseEditState, token],
+    [detailExerciseId, editExerciseId, load, onAuthInvalid, resetExerciseEditState, token],
   );
 
   const openExerciseMoreActions = useCallback(
@@ -2574,6 +2710,18 @@ function DashboardScreen({
     return Math.round(dailyTarget.targetCalories - summary.calories + exerciseSummary.calories);
   }, [dailyTarget?.targetCalories, exerciseSummary.calories, summary.calories]);
 
+  const netCalories = useMemo(
+    () => Math.round(Number(summary.calories ?? 0) - Number(exerciseSummary.calories ?? 0)),
+    [exerciseSummary.calories, summary.calories],
+  );
+
+  const calorieChangeFromPreviousDay = useMemo(() => {
+    if (previousDayNetCalories === null) {
+      return null;
+    }
+    return netCalories - previousDayNetCalories;
+  }, [netCalories, previousDayNetCalories]);
+
   const calendarCells = useMemo(() => buildCalendarCells(selectedMonth), [selectedMonth]);
   const weekStripCells = useMemo(() => buildWeekStripCells(selectedDate), [selectedDate]);
 
@@ -2609,11 +2757,22 @@ function DashboardScreen({
     [detailLogId, logs],
   );
 
+  const detailExercise = useMemo(
+    () => (detailExerciseId ? exercises.find((item) => item.id === detailExerciseId) ?? null : null),
+    [detailExerciseId, exercises],
+  );
+
   useEffect(() => {
     if (detailLogId && !detailLog) {
       setDetailLogId(null);
     }
   }, [detailLog, detailLogId]);
+
+  useEffect(() => {
+    if (detailExerciseId && !detailExercise) {
+      setDetailExerciseId(null);
+    }
+  }, [detailExercise, detailExerciseId]);
 
   const detailItems = useMemo(() => parseLogItems(detailLog?.items), [detailLog?.items]);
 
@@ -2647,6 +2806,92 @@ function DashboardScreen({
       { label: '维生素 D', value: formatIU(nutrients.vitaminDIU) },
     ];
   }, [detailLog]);
+
+  const detailExerciseRows = useMemo(() => {
+    if (!detailExercise) {
+      return [] as Array<{ label: string; value: string }>;
+    }
+    const totalExerciseCalories = Number(exerciseSummary.calories ?? 0);
+    const targetCalories = Number(dailyTarget?.targetCalories ?? 0);
+    const net = Number(summary.calories ?? 0) - totalExerciseCalories;
+    const remain = targetCalories > 0 ? targetCalories - net : null;
+    const exerciseShare = totalExerciseCalories > 0 ? (Number(detailExercise.calories ?? 0) / totalExerciseCalories) * 100 : null;
+    return [
+      { label: '运动类型', value: detailExercise.exerciseType || '运动' },
+      { label: '运动强度', value: formatIntensity(detailExercise.intensity) },
+      { label: '运动时长', value: `${Math.round(Number(detailExercise.durationMin ?? 0))} 分钟` },
+      { label: '估算 MET', value: roundTo(Number(detailExercise.met ?? 0), 1).toString() },
+      { label: '本次消耗', value: formatKcal(detailExercise.calories) },
+      { label: '占今日运动消耗', value: exerciseShare === null ? '-' : `${clamp(exerciseShare, 0, 100).toFixed(0)}%` },
+      { label: '今日食物摄入', value: formatKcal(summary.calories) },
+      { label: '今日运动消耗', value: formatKcal(totalExerciseCalories) },
+      { label: '今日净摄入', value: formatKcal(net) },
+      { label: '目标剩余', value: remain === null ? '-' : formatKcal(remain) },
+    ];
+  }, [dailyTarget?.targetCalories, detailExercise, exerciseSummary.calories, summary.calories]);
+
+  if (detailExercise) {
+    const exerciseHealthText = buildExerciseHealthAnalysis(detailExercise, {
+      foodSummary: summary,
+      exerciseSummary,
+      target: dailyTarget,
+    });
+    return (
+      <SafeAreaView style={styles.journalSafe}>
+        <View style={styles.journalContainer}>
+          <View style={styles.logDetailHeader}>
+            <Pressable style={styles.logDetailBackButton} onPress={() => setDetailExerciseId(null)}>
+              <Text style={styles.logDetailBackText}>← 返回</Text>
+            </Pressable>
+            <Text style={styles.logDetailHeaderTime}>{formatDateTimeLabel(detailExercise.loggedAt)}</Text>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.logDetailScrollContent}>
+            <View style={styles.logDetailCard}>
+              <View style={styles.logDetailTopContent}>
+                <Text style={styles.logDetailTitle}>运动：{detailExercise.exerciseType || '运动'}</Text>
+                <Text style={styles.logDetailSubtitle}>{detailExercise.note || '无补充描述'}</Text>
+              </View>
+
+              <View style={styles.logDetailSummaryRow}>
+                <View style={styles.logDetailSummaryCell}>
+                  <Text style={styles.logDetailSummaryLabel}>消耗</Text>
+                  <Text style={styles.logDetailSummaryValue}>{Math.round(Number(detailExercise.calories ?? 0))}</Text>
+                </View>
+                <View style={styles.logDetailSummaryCell}>
+                  <Text style={styles.logDetailSummaryLabel}>时长</Text>
+                  <Text style={styles.logDetailSummaryValue}>{Math.round(Number(detailExercise.durationMin ?? 0))}分</Text>
+                </View>
+                <View style={styles.logDetailSummaryCell}>
+                  <Text style={styles.logDetailSummaryLabel}>强度</Text>
+                  <Text style={styles.logDetailSummaryValue}>{formatIntensity(detailExercise.intensity)}</Text>
+                </View>
+                <View style={styles.logDetailSummaryCell}>
+                  <Text style={styles.logDetailSummaryLabel}>MET</Text>
+                  <Text style={styles.logDetailSummaryValue}>{roundTo(Number(detailExercise.met ?? 0), 1)}</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.logDetailCard}>
+              <Text style={styles.logDetailSectionTitle}>运动分析</Text>
+              <Text style={styles.logDetailSectionText}>{exerciseHealthText}</Text>
+            </View>
+
+            <View style={styles.logDetailCard}>
+              <Text style={styles.logDetailSectionTitle}>运动与当天目标</Text>
+              {detailExerciseRows.map((row) => (
+                <View key={row.label} style={styles.logDetailNutrientRow}>
+                  <Text style={styles.logDetailNutrientLabel}>{row.label}</Text>
+                  <Text style={styles.logDetailNutrientValue}>{row.value}</Text>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (detailLog) {
     const detailHealthText = buildHealthAnalysis(detailLog, dailyTarget);
@@ -2735,7 +2980,7 @@ function DashboardScreen({
             <Text style={styles.journalDateText}>{selectedDate === todayDateString() ? '今天' : selectedDate}</Text>
             <Text style={styles.journalDateArrow}>{calendarExpanded ? '▲' : '▼'}</Text>
           </Pressable>
-          <Text style={styles.journalRemainText}>剩余 {remainCalories === null ? '-' : remainCalories} 千卡</Text>
+          <Text style={styles.journalRemainText}>{formatSignedKcalChange(calorieChangeFromPreviousDay)}</Text>
         </View>
 
         {calendarExpanded ? (
@@ -2860,7 +3105,13 @@ function DashboardScreen({
               const exercise = entry.exercise;
               return (
                 <View key={`exercise-${exercise.id}`} style={styles.journalEntryCard}>
-                  <View style={styles.journalEntryMain}>
+                  <Pressable
+                    style={styles.journalEntryMain}
+                    onPress={() => {
+                      setDetailLogId(null);
+                      setDetailExerciseId(exercise.id);
+                    }}
+                  >
                     <View style={styles.journalEntryTextWrap}>
                       <Text style={styles.journalEntryTitle}>运动：{exercise.exerciseType}</Text>
                       {exercise.note ? <Text style={styles.journalEntryNote}>{exercise.note}</Text> : null}
@@ -2871,7 +3122,7 @@ function DashboardScreen({
                       <Text style={styles.journalEntryMetric}>{formatIntensity(exercise.intensity)}</Text>
                       <Text style={styles.journalEntryMetric}>MET {Math.round(exercise.met * 10) / 10}</Text>
                     </View>
-                  </View>
+                  </Pressable>
                   <View style={styles.journalEntryFooter}>
                     <Text style={styles.journalEntryTime}>{formatClockTime(exercise.loggedAt)}</Text>
                     <View style={styles.journalEntryActions}>
@@ -2890,7 +3141,13 @@ function DashboardScreen({
             const items = parseLogItems(log.items);
             return (
               <View key={`food-${log.id}`} style={styles.journalEntryCard}>
-                <Pressable style={styles.journalEntryMain} onPress={() => setDetailLogId(log.id)}>
+                <Pressable
+                  style={styles.journalEntryMain}
+                  onPress={() => {
+                    setDetailExerciseId(null);
+                    setDetailLogId(log.id);
+                  }}
+                >
                   <View style={styles.journalEntryTop}>
                     {log.imageUri ? <Image source={{ uri: log.imageUri }} style={styles.journalEntryImage} /> : null}
                     <View style={styles.journalEntryTextWrap}>
