@@ -18,12 +18,39 @@ export type NutritionAnalysis = {
     carbsGram: number;
     fatGram: number;
     fiberGram: number;
+    sugarGram: number;
+    addedSugarGram: number;
+    sugarAlcoholGram: number;
+    sodiumMg: number;
+    potassiumMg: number;
+    calciumMg: number;
+    ironMg: number;
+    cholesterolMg: number;
+    saturatedFatGram: number;
+    transFatGram: number;
+    monounsaturatedFatGram: number;
+    polyunsaturatedFatGram: number;
+    vitaminAIU: number;
+    vitaminCMg: number;
+    vitaminDIU: number;
   };
   confidence: number;
   notes: string;
 };
 
+type NutritionTotals = NutritionAnalysis["totals"];
+
 type AIProvider = "openai" | "openai_compat_auto" | "openai_compat_responses" | "openai_compat_chat";
+
+type AIClientConfig = {
+  provider: AIProvider;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  imageDetail: "low" | "high" | "auto";
+  timeoutMs: number;
+  label: string;
+};
 
 const outputSchema = {
   type: "object",
@@ -50,13 +77,49 @@ const outputSchema = {
     totals: {
       type: "object",
       additionalProperties: false,
-      required: ["calories", "proteinGram", "carbsGram", "fatGram", "fiberGram"],
+      required: [
+        "calories",
+        "proteinGram",
+        "carbsGram",
+        "fatGram",
+        "fiberGram",
+        "sugarGram",
+        "addedSugarGram",
+        "sugarAlcoholGram",
+        "sodiumMg",
+        "potassiumMg",
+        "calciumMg",
+        "ironMg",
+        "cholesterolMg",
+        "saturatedFatGram",
+        "transFatGram",
+        "monounsaturatedFatGram",
+        "polyunsaturatedFatGram",
+        "vitaminAIU",
+        "vitaminCMg",
+        "vitaminDIU",
+      ],
       properties: {
         calories: { type: "number" },
         proteinGram: { type: "number" },
         carbsGram: { type: "number" },
         fatGram: { type: "number" },
         fiberGram: { type: "number" },
+        sugarGram: { type: "number" },
+        addedSugarGram: { type: "number" },
+        sugarAlcoholGram: { type: "number" },
+        sodiumMg: { type: "number" },
+        potassiumMg: { type: "number" },
+        calciumMg: { type: "number" },
+        ironMg: { type: "number" },
+        cholesterolMg: { type: "number" },
+        saturatedFatGram: { type: "number" },
+        transFatGram: { type: "number" },
+        monounsaturatedFatGram: { type: "number" },
+        polyunsaturatedFatGram: { type: "number" },
+        vitaminAIU: { type: "number" },
+        vitaminCMg: { type: "number" },
+        vitaminDIU: { type: "number" },
       },
     },
     confidence: { type: "number" },
@@ -69,8 +132,150 @@ function toNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function resolveProvider(): AIProvider {
-  const raw = String(config.aiProvider ?? "openai").toLowerCase();
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function roundTo(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function buildNutrientHintText(items: NutritionItem[], raw: any): string {
+  const itemNames = items.map((item) => item.name).join(" ");
+  const note = typeof raw?.notes === "string" ? raw.notes : "";
+  return `${itemNames} ${note}`.toLowerCase();
+}
+
+function enrichTotalsByHeuristics(totals: NutritionTotals, items: NutritionItem[], raw: any): NutritionTotals {
+  const next: NutritionTotals = { ...totals };
+  const hintText = buildNutrientHintText(items, raw);
+
+  const calories = Math.max(0, next.calories);
+  const carbs = Math.max(0, next.carbsGram);
+  const protein = Math.max(0, next.proteinGram);
+  const fat = Math.max(0, next.fatGram);
+  const fiber = Math.max(0, next.fiberGram);
+
+  const salty = /(泡菜|咸菜|榨菜|腌|酱油|味噌|卤|火锅|拉面|方便面|汤底|咸|kimchi|pickle|brine|soy sauce|ramen|bacon|sausage)/i.test(
+    hintText,
+  );
+  const sweet = /(糖|甜|奶茶|饮料|果汁|可乐|汽水|甜点|蛋糕|饼干|冰淇淋|巧克力|蜂蜜|果酱|sugar|sweet|juice|soda|cake|cookie|dessert|honey|jam)/i.test(
+    hintText,
+  );
+  const fruit = /(苹果|香蕉|葡萄|橙|西瓜|草莓|芒果|菠萝|fruit|apple|banana|orange|grape|mango|pineapple|berry)/i.test(
+    hintText,
+  );
+  const friedOrProcessed = /(油炸|炸|培根|腊肉|香肠|午餐肉|黄油|奶油|芝士|fried|bacon|sausage|butter|cream|cheese)/i.test(
+    hintText,
+  );
+  const animalFood = /(鸡|牛|猪|羊|鱼|虾|蛋|奶|肉|chicken|beef|pork|lamb|fish|shrimp|egg|milk|meat)/i.test(
+    hintText,
+  );
+
+  let sugarEstimate = carbs * (fruit ? 0.45 : sweet ? 0.34 : 0.18);
+  if (!fruit && !sweet && carbs < 10) {
+    sugarEstimate = carbs * 0.1;
+  }
+  sugarEstimate = clamp(sugarEstimate, carbs > 0 ? 0.2 : 0, carbs);
+  const sugarLooksInvalid =
+    next.sugarGram <= 0 ||
+    (carbs >= 18 && next.sugarGram < 1) ||
+    ((sweet || fruit) && carbs >= 8 && next.sugarGram < 2);
+  if (sugarLooksInvalid && carbs > 0) {
+    next.sugarGram = roundTo(sugarEstimate, 1);
+  }
+
+  let addedSugarEstimate = sweet ? next.sugarGram * 0.55 : fruit ? next.sugarGram * 0.12 : next.sugarGram * 0.25;
+  addedSugarEstimate = clamp(addedSugarEstimate, 0, next.sugarGram);
+  const addedSugarLooksInvalid =
+    next.addedSugarGram < 0 ||
+    next.addedSugarGram > next.sugarGram ||
+    (sweet && next.sugarGram >= 3 && next.addedSugarGram < 1);
+  if (addedSugarLooksInvalid) {
+    next.addedSugarGram = roundTo(addedSugarEstimate, 1);
+  }
+
+  if (!Number.isFinite(next.sugarAlcoholGram) || next.sugarAlcoholGram < 0) {
+    next.sugarAlcoholGram = 0;
+  }
+  if (next.sugarAlcoholGram > next.sugarGram) {
+    next.sugarAlcoholGram = roundTo(clamp(next.sugarGram * 0.3, 0, next.sugarGram), 1);
+  }
+
+  let sodiumEstimate = Math.max(80, calories * 1.05, protein * 8 + carbs * 2 + fiber * 6);
+  if (salty) {
+    sodiumEstimate = Math.max(sodiumEstimate, 700);
+  }
+  if (/(泡菜|咸菜|榨菜|酱油|味噌|腌|火锅|拉面|方便面|汤底)/i.test(hintText)) {
+    sodiumEstimate = Math.max(sodiumEstimate, 900);
+  }
+  const sodiumLooksInvalid = next.sodiumMg <= 0 || (salty && next.sodiumMg < 220);
+  if (sodiumLooksInvalid) {
+    next.sodiumMg = roundTo(clamp(sodiumEstimate, 50, 6000), 0);
+  }
+
+  if (next.potassiumMg <= 0) {
+    next.potassiumMg = roundTo(Math.max(120, protein * 15 + carbs * 6 + fiber * 18), 0);
+  }
+  if (next.calciumMg <= 0) {
+    next.calciumMg = roundTo(Math.max(30, protein * 3.2 + fat * 1.6 + fiber * 3), 0);
+  }
+  if (next.ironMg <= 0) {
+    next.ironMg = roundTo(Math.max(0.4, protein * 0.07 + carbs * 0.015 + fiber * 0.1), 1);
+  }
+
+  if (next.cholesterolMg <= 0) {
+    const cholesterolEstimate = animalFood ? Math.max(18, protein * 1.4 + fat * 2.2) : Math.max(0, protein * 0.2);
+    next.cholesterolMg = roundTo(cholesterolEstimate, 0);
+  }
+
+  let saturatedEstimate = fat * (friedOrProcessed ? 0.38 : 0.32);
+  saturatedEstimate = clamp(saturatedEstimate, 0, fat);
+  if (next.saturatedFatGram <= 0 || next.saturatedFatGram > fat) {
+    next.saturatedFatGram = roundTo(saturatedEstimate, 1);
+  } else {
+    next.saturatedFatGram = roundTo(clamp(next.saturatedFatGram, 0, fat), 1);
+  }
+
+  let transEstimate = friedOrProcessed ? fat * 0.015 : fat * 0.004;
+  transEstimate = clamp(transEstimate, 0, Math.max(fat - next.saturatedFatGram, 0));
+  if (next.transFatGram < 0 || next.transFatGram > fat) {
+    next.transFatGram = roundTo(transEstimate, 1);
+  } else {
+    next.transFatGram = roundTo(clamp(next.transFatGram, 0, Math.max(fat - next.saturatedFatGram, 0)), 1);
+  }
+
+  const remainUnsaturated = Math.max(fat - next.saturatedFatGram - next.transFatGram, 0);
+  let mono = next.monounsaturatedFatGram;
+  let poly = next.polyunsaturatedFatGram;
+  if (mono < 0 || poly < 0 || mono + poly <= 0 || mono + poly > Math.max(remainUnsaturated * 1.5, 0.1)) {
+    mono = remainUnsaturated * 0.62;
+    poly = remainUnsaturated * 0.38;
+  } else if (mono + poly > remainUnsaturated && mono + poly > 0) {
+    const scale = remainUnsaturated / (mono + poly);
+    mono *= scale;
+    poly *= scale;
+  }
+  next.monounsaturatedFatGram = roundTo(clamp(mono, 0, remainUnsaturated), 1);
+  next.polyunsaturatedFatGram = roundTo(clamp(poly, 0, Math.max(remainUnsaturated - next.monounsaturatedFatGram, 0)), 1);
+
+  if (next.vitaminAIU <= 0) {
+    next.vitaminAIU = roundTo(Math.max(0, fat * 18 + fiber * 32), 0);
+  }
+  if (next.vitaminCMg <= 0) {
+    const vitaminCEstimate = fruit ? fiber * 4 + carbs * 0.22 : fiber * 2.3 + carbs * 0.08;
+    next.vitaminCMg = roundTo(Math.max(0, vitaminCEstimate), 1);
+  }
+  if (next.vitaminDIU <= 0) {
+    next.vitaminDIU = roundTo(Math.max(0, protein * 0.45 + fat * 0.6), 0);
+  }
+
+  return next;
+}
+
+function resolveProvider(rawInput?: string): AIProvider {
+  const raw = String(rawInput ?? config.aiProvider ?? "openai").toLowerCase();
 
   if (
     raw === "openai" ||
@@ -84,8 +289,8 @@ function resolveProvider(): AIProvider {
   return "openai_compat_auto";
 }
 
-function resolveImageDetail(): "low" | "high" | "auto" {
-  const detail = String(config.aiImageDetail ?? "auto").toLowerCase();
+function resolveImageDetail(rawInput?: string): "low" | "high" | "auto" {
+  const detail = String(rawInput ?? config.aiImageDetail ?? "auto").toLowerCase();
   if (detail === "low" || detail === "high") {
     return detail;
   }
@@ -96,15 +301,69 @@ function normalizeBaseUrl(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
 }
 
-function buildPrompt() {
-  return [
+function buildPrimaryClientConfig(): AIClientConfig | null {
+  const apiKey = String(config.aiApiKey ?? "").trim();
+  if (!apiKey) {
+    return null;
+  }
+
+  return {
+    provider: resolveProvider(config.aiProvider),
+    baseUrl: normalizeBaseUrl(config.aiBaseUrl),
+    apiKey,
+    model: config.aiModel,
+    imageDetail: resolveImageDetail(config.aiImageDetail),
+    timeoutMs: config.aiTimeoutMs,
+    label: "主线路",
+  };
+}
+
+function buildBackupClientConfig(): AIClientConfig | null {
+  const backupKey = String(config.aiBackupApiKey ?? "").trim();
+  const backupBaseUrl = String(config.aiBackupBaseUrl ?? "").trim();
+  const backupModel = String(config.aiBackupModel ?? "").trim();
+
+  // 只要任一备线字段填写，就尝试启用备线；未填写项回退主线配置。
+  const backupTouched = Boolean(backupKey || backupBaseUrl || backupModel);
+  if (!backupTouched) {
+    return null;
+  }
+
+  const apiKey = backupKey || String(config.aiApiKey ?? "").trim();
+  if (!apiKey) {
+    return null;
+  }
+
+  const timeoutMs = Number(config.aiBackupTimeoutMs);
+  const effectiveTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : config.aiTimeoutMs;
+
+  return {
+    provider: resolveProvider(config.aiBackupProvider || config.aiProvider),
+    baseUrl: normalizeBaseUrl(backupBaseUrl || config.aiBaseUrl),
+    apiKey,
+    model: backupModel || config.aiModel,
+    imageDetail: resolveImageDetail(config.aiBackupImageDetail || config.aiImageDetail),
+    timeoutMs: effectiveTimeoutMs,
+    label: "备用线路",
+  };
+}
+
+function buildPrompt(description?: string) {
+  const lines = [
     "你是营养师助手。请根据食物图片估算食物组成与营养。",
     "请仅返回 JSON，不要输出任何解释文字。",
     "JSON 必须包含 items/totals/confidence/notes 四个字段。",
     "items 每项包含 name/calories/proteinGram/carbsGram/fatGram，可选 estimatedWeightGram/fiberGram。",
-    "totals 必须包含 calories/proteinGram/carbsGram/fatGram/fiberGram。",
+    "totals 必须包含以下全部字段（都要给数字，无法确定时给合理估算，不要省略字段）：",
+    "calories/proteinGram/carbsGram/fatGram/fiberGram/sugarGram/addedSugarGram/sugarAlcoholGram/sodiumMg/potassiumMg/calciumMg/ironMg/cholesterolMg/saturatedFatGram/transFatGram/monounsaturatedFatGram/polyunsaturatedFatGram/vitaminAIU/vitaminCMg/vitaminDIU。",
     "如果不确定，请在 notes 说明不确定点，并降低 confidence。",
-  ].join("\n");
+  ];
+
+  if (description?.trim()) {
+    lines.push(`用户补充描述：${description.trim()}`);
+  }
+
+  return lines.join("\n");
 }
 
 function buildTextPrompt(description: string) {
@@ -113,7 +372,8 @@ function buildTextPrompt(description: string) {
     "请仅返回 JSON，不要输出任何解释文字。",
     "JSON 必须包含 items/totals/confidence/notes 四个字段。",
     "items 每项包含 name/calories/proteinGram/carbsGram/fatGram，可选 estimatedWeightGram/fiberGram。",
-    "totals 必须包含 calories/proteinGram/carbsGram/fatGram/fiberGram。",
+    "totals 必须包含以下全部字段（都要给数字，无法确定时给合理估算，不要省略字段）：",
+    "calories/proteinGram/carbsGram/fatGram/fiberGram/sugarGram/addedSugarGram/sugarAlcoholGram/sodiumMg/potassiumMg/calciumMg/ironMg/cholesterolMg/saturatedFatGram/transFatGram/monounsaturatedFatGram/polyunsaturatedFatGram/vitaminAIU/vitaminCMg/vitaminDIU。",
     "如果不确定，请在 notes 说明不确定点，并降低 confidence。",
     `用户描述：${description}`,
   ].join("\n");
@@ -253,13 +513,29 @@ function normalizeAnalysis(raw: any): NutritionAnalysis {
     { calories: 0, proteinGram: 0, carbsGram: 0, fatGram: 0, fiberGram: 0 },
   );
 
-  const totals = {
+  const rawTotals: NutritionTotals = {
     calories: toNumber(raw?.totals?.calories, computedTotals.calories),
     proteinGram: toNumber(raw?.totals?.proteinGram, computedTotals.proteinGram),
     carbsGram: toNumber(raw?.totals?.carbsGram, computedTotals.carbsGram),
     fatGram: toNumber(raw?.totals?.fatGram, computedTotals.fatGram),
     fiberGram: toNumber(raw?.totals?.fiberGram, computedTotals.fiberGram),
+    sugarGram: toNumber(raw?.totals?.sugarGram),
+    addedSugarGram: toNumber(raw?.totals?.addedSugarGram),
+    sugarAlcoholGram: toNumber(raw?.totals?.sugarAlcoholGram),
+    sodiumMg: toNumber(raw?.totals?.sodiumMg),
+    potassiumMg: toNumber(raw?.totals?.potassiumMg),
+    calciumMg: toNumber(raw?.totals?.calciumMg),
+    ironMg: toNumber(raw?.totals?.ironMg),
+    cholesterolMg: toNumber(raw?.totals?.cholesterolMg),
+    saturatedFatGram: toNumber(raw?.totals?.saturatedFatGram),
+    transFatGram: toNumber(raw?.totals?.transFatGram),
+    monounsaturatedFatGram: toNumber(raw?.totals?.monounsaturatedFatGram),
+    polyunsaturatedFatGram: toNumber(raw?.totals?.polyunsaturatedFatGram),
+    vitaminAIU: toNumber(raw?.totals?.vitaminAIU),
+    vitaminCMg: toNumber(raw?.totals?.vitaminCMg),
+    vitaminDIU: toNumber(raw?.totals?.vitaminDIU),
   };
+  const totals = enrichTotalsByHeuristics(rawTotals, items, raw);
 
   return {
     items,
@@ -288,6 +564,21 @@ function mockAnalysis(): NutritionAnalysis {
       carbsGram: 52,
       fatGram: 18,
       fiberGram: 5,
+      sugarGram: 6,
+      addedSugarGram: 0,
+      sugarAlcoholGram: 0,
+      sodiumMg: 650,
+      potassiumMg: 520,
+      calciumMg: 90,
+      ironMg: 3.2,
+      cholesterolMg: 85,
+      saturatedFatGram: 5.2,
+      transFatGram: 0,
+      monounsaturatedFatGram: 7.5,
+      polyunsaturatedFatGram: 3.1,
+      vitaminAIU: 480,
+      vitaminCMg: 12,
+      vitaminDIU: 24,
     },
     confidence: 0.35,
     notes: "未配置 AI_API_KEY（或 OPENAI_API_KEY），当前为演示估算值。",
@@ -302,8 +593,9 @@ async function callResponsesApi(params: {
   imageDataUrl: string;
   imageDetail: "low" | "high" | "auto";
   strictJsonSchema: boolean;
+  timeoutMs: number;
 }) {
-  const { baseUrl, apiKey, model, prompt, imageDataUrl, imageDetail, strictJsonSchema } = params;
+  const { baseUrl, apiKey, model, prompt, imageDataUrl, imageDetail, strictJsonSchema, timeoutMs } = params;
 
   const requestBody: Record<string, unknown> = {
     model,
@@ -344,7 +636,7 @@ async function callResponsesApi(params: {
       },
       body: JSON.stringify(requestBody),
     },
-    config.aiTimeoutMs,
+    timeoutMs,
   );
 
   const outputText = extractTextOutputFromResponses(payload);
@@ -362,8 +654,9 @@ async function callChatCompletionsApi(params: {
   prompt: string;
   imageDataUrl: string;
   imageDetail: "low" | "high" | "auto";
+  timeoutMs: number;
 }) {
-  const { baseUrl, apiKey, model, prompt, imageDataUrl, imageDetail } = params;
+  const { baseUrl, apiKey, model, prompt, imageDataUrl, imageDetail, timeoutMs } = params;
 
   const payload = await fetchJsonWithTimeout(
     `${baseUrl}/chat/completions`,
@@ -399,7 +692,7 @@ async function callChatCompletionsApi(params: {
         ],
       }),
     },
-    config.aiTimeoutMs,
+    timeoutMs,
   );
 
   const outputText = extractTextOutputFromChatCompletions(payload);
@@ -416,8 +709,9 @@ async function callResponsesApiText(params: {
   model: string;
   prompt: string;
   strictJsonSchema: boolean;
+  timeoutMs: number;
 }) {
-  const { baseUrl, apiKey, model, prompt, strictJsonSchema } = params;
+  const { baseUrl, apiKey, model, prompt, strictJsonSchema, timeoutMs } = params;
 
   const requestBody: Record<string, unknown> = {
     model,
@@ -451,7 +745,7 @@ async function callResponsesApiText(params: {
       },
       body: JSON.stringify(requestBody),
     },
-    config.aiTimeoutMs,
+    timeoutMs,
   );
 
   const outputText = extractTextOutputFromResponses(payload);
@@ -467,8 +761,9 @@ async function callChatCompletionsApiText(params: {
   apiKey: string;
   model: string;
   prompt: string;
+  timeoutMs: number;
 }) {
-  const { baseUrl, apiKey, model, prompt } = params;
+  const { baseUrl, apiKey, model, prompt, timeoutMs } = params;
 
   const payload = await fetchJsonWithTimeout(
     `${baseUrl}/chat/completions`,
@@ -495,7 +790,7 @@ async function callChatCompletionsApiText(params: {
         ],
       }),
     },
-    config.aiTimeoutMs,
+    timeoutMs,
   );
 
   const outputText = extractTextOutputFromChatCompletions(payload);
@@ -506,75 +801,7 @@ async function callChatCompletionsApiText(params: {
   return outputText;
 }
 
-export async function analyzeFoodImage(base64Image: string, mimeType: string) {
-  if (!config.aiApiKey) {
-    return mockAnalysis();
-  }
-
-  const provider = resolveProvider();
-  const baseUrl = normalizeBaseUrl(config.aiBaseUrl);
-  const prompt = buildPrompt();
-  const imageDetail = resolveImageDetail();
-  const imageDataUrl = `data:${mimeType};base64,${base64Image}`;
-
-  let rawText: string;
-
-  if (provider === "openai") {
-    rawText = await callResponsesApi({
-      baseUrl,
-      apiKey: config.aiApiKey,
-      model: config.aiModel,
-      prompt,
-      imageDataUrl,
-      imageDetail,
-      strictJsonSchema: true,
-    });
-  } else if (provider === "openai_compat_responses") {
-    rawText = await callResponsesApi({
-      baseUrl,
-      apiKey: config.aiApiKey,
-      model: config.aiModel,
-      prompt,
-      imageDataUrl,
-      imageDetail,
-      strictJsonSchema: false,
-    });
-  } else if (provider === "openai_compat_chat") {
-    rawText = await callChatCompletionsApi({
-      baseUrl,
-      apiKey: config.aiApiKey,
-      model: config.aiModel,
-      prompt,
-      imageDataUrl,
-      imageDetail,
-    });
-  } else {
-    try {
-      rawText = await callResponsesApi({
-        baseUrl,
-        apiKey: config.aiApiKey,
-        model: config.aiModel,
-        prompt,
-        imageDataUrl,
-        imageDetail,
-        strictJsonSchema: false,
-      });
-    } catch (error) {
-      rawText = await callChatCompletionsApi({
-        baseUrl,
-        apiKey: config.aiApiKey,
-        model: config.aiModel,
-        prompt,
-        imageDataUrl,
-        imageDetail,
-      }).catch((chatError) => {
-        throw new Error(
-          `兼容模式调用失败。responses 错误：${(error as Error).message}；chat 错误：${(chatError as Error).message}`,
-        );
-      });
-    }
-  }
-
+function parseAnalysisFromRawText(rawText: string): NutritionAnalysis {
   const jsonText = extractJsonText(rawText);
 
   let parsed: any;
@@ -587,58 +814,69 @@ export async function analyzeFoodImage(base64Image: string, mimeType: string) {
   return normalizeAnalysis(parsed);
 }
 
-export async function analyzeFoodText(description: string) {
-  if (!config.aiApiKey) {
-    return {
-      ...mockAnalysis(),
-      notes: "未配置 AI_API_KEY（或 OPENAI_API_KEY），当前为演示估算值。你也可以先记录文字描述。",
-    };
-  }
-
-  const provider = resolveProvider();
-  const baseUrl = normalizeBaseUrl(config.aiBaseUrl);
-  const prompt = buildTextPrompt(description);
-
+async function analyzeImageWithClient(
+  client: AIClientConfig,
+  base64Image: string,
+  mimeType: string,
+  description?: string,
+) {
+  const prompt = buildPrompt(description);
+  const imageDataUrl = `data:${mimeType};base64,${base64Image}`;
   let rawText: string;
 
-  if (provider === "openai") {
-    rawText = await callResponsesApiText({
-      baseUrl,
-      apiKey: config.aiApiKey,
-      model: config.aiModel,
+  if (client.provider === "openai") {
+    rawText = await callResponsesApi({
+      baseUrl: client.baseUrl,
+      apiKey: client.apiKey,
+      model: client.model,
       prompt,
+      imageDataUrl,
+      imageDetail: client.imageDetail,
       strictJsonSchema: true,
+      timeoutMs: client.timeoutMs,
     });
-  } else if (provider === "openai_compat_responses") {
-    rawText = await callResponsesApiText({
-      baseUrl,
-      apiKey: config.aiApiKey,
-      model: config.aiModel,
+  } else if (client.provider === "openai_compat_responses") {
+    rawText = await callResponsesApi({
+      baseUrl: client.baseUrl,
+      apiKey: client.apiKey,
+      model: client.model,
       prompt,
+      imageDataUrl,
+      imageDetail: client.imageDetail,
       strictJsonSchema: false,
+      timeoutMs: client.timeoutMs,
     });
-  } else if (provider === "openai_compat_chat") {
-    rawText = await callChatCompletionsApiText({
-      baseUrl,
-      apiKey: config.aiApiKey,
-      model: config.aiModel,
+  } else if (client.provider === "openai_compat_chat") {
+    rawText = await callChatCompletionsApi({
+      baseUrl: client.baseUrl,
+      apiKey: client.apiKey,
+      model: client.model,
       prompt,
+      imageDataUrl,
+      imageDetail: client.imageDetail,
+      timeoutMs: client.timeoutMs,
     });
   } else {
     try {
-      rawText = await callResponsesApiText({
-        baseUrl,
-        apiKey: config.aiApiKey,
-        model: config.aiModel,
+      rawText = await callResponsesApi({
+        baseUrl: client.baseUrl,
+        apiKey: client.apiKey,
+        model: client.model,
         prompt,
+        imageDataUrl,
+        imageDetail: client.imageDetail,
         strictJsonSchema: false,
+        timeoutMs: client.timeoutMs,
       });
     } catch (error) {
-      rawText = await callChatCompletionsApiText({
-        baseUrl,
-        apiKey: config.aiApiKey,
-        model: config.aiModel,
+      rawText = await callChatCompletionsApi({
+        baseUrl: client.baseUrl,
+        apiKey: client.apiKey,
+        model: client.model,
         prompt,
+        imageDataUrl,
+        imageDetail: client.imageDetail,
+        timeoutMs: client.timeoutMs,
       }).catch((chatError) => {
         throw new Error(
           `兼容模式调用失败。responses 错误：${(error as Error).message}；chat 错误：${(chatError as Error).message}`,
@@ -647,14 +885,125 @@ export async function analyzeFoodText(description: string) {
     }
   }
 
-  const jsonText = extractJsonText(rawText);
+  return parseAnalysisFromRawText(rawText);
+}
 
-  let parsed: any;
-  try {
-    parsed = JSON.parse(jsonText);
-  } catch {
-    throw new Error("AI 返回结果不是有效 JSON");
+async function analyzeTextWithClient(client: AIClientConfig, description: string) {
+  const prompt = buildTextPrompt(description);
+  let rawText: string;
+
+  if (client.provider === "openai") {
+    rawText = await callResponsesApiText({
+      baseUrl: client.baseUrl,
+      apiKey: client.apiKey,
+      model: client.model,
+      prompt,
+      strictJsonSchema: true,
+      timeoutMs: client.timeoutMs,
+    });
+  } else if (client.provider === "openai_compat_responses") {
+    rawText = await callResponsesApiText({
+      baseUrl: client.baseUrl,
+      apiKey: client.apiKey,
+      model: client.model,
+      prompt,
+      strictJsonSchema: false,
+      timeoutMs: client.timeoutMs,
+    });
+  } else if (client.provider === "openai_compat_chat") {
+    rawText = await callChatCompletionsApiText({
+      baseUrl: client.baseUrl,
+      apiKey: client.apiKey,
+      model: client.model,
+      prompt,
+      timeoutMs: client.timeoutMs,
+    });
+  } else {
+    try {
+      rawText = await callResponsesApiText({
+        baseUrl: client.baseUrl,
+        apiKey: client.apiKey,
+        model: client.model,
+        prompt,
+        strictJsonSchema: false,
+        timeoutMs: client.timeoutMs,
+      });
+    } catch (error) {
+      rawText = await callChatCompletionsApiText({
+        baseUrl: client.baseUrl,
+        apiKey: client.apiKey,
+        model: client.model,
+        prompt,
+        timeoutMs: client.timeoutMs,
+      }).catch((chatError) => {
+        throw new Error(
+          `兼容模式调用失败。responses 错误：${(error as Error).message}；chat 错误：${(chatError as Error).message}`,
+        );
+      });
+    }
   }
 
-  return normalizeAnalysis(parsed);
+  return parseAnalysisFromRawText(rawText);
+}
+
+async function withBackupFallback<T>(
+  primary: AIClientConfig | null,
+  backup: AIClientConfig | null,
+  action: (client: AIClientConfig) => Promise<T>,
+): Promise<T> {
+  let primaryError: Error | null = null;
+
+  if (primary) {
+    try {
+      return await action(primary);
+    } catch (error) {
+      primaryError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  if (backup) {
+    try {
+      return await action(backup);
+    } catch (error) {
+      const backupError = error instanceof Error ? error : new Error(String(error));
+      if (primaryError) {
+        const primaryLabel = primary?.label ?? "主线路";
+        throw new Error(`${primaryLabel}失败：${primaryError.message}；${backup.label}失败：${backupError.message}`);
+      }
+      throw backupError;
+    }
+  }
+
+  if (primaryError) {
+    throw primaryError;
+  }
+
+  throw new Error("未配置可用 AI 线路，请检查 AI_API_KEY 与备用线路配置。");
+}
+
+export async function analyzeFoodImage(base64Image: string, mimeType: string, description?: string) {
+  const primary = buildPrimaryClientConfig();
+  const backup = buildBackupClientConfig();
+
+  if (!primary && !backup) {
+    return mockAnalysis();
+  }
+
+  return withBackupFallback(primary, backup, (client) =>
+    analyzeImageWithClient(client, base64Image, mimeType, description),
+  );
+}
+
+export async function analyzeFoodText(description: string) {
+  const primary = buildPrimaryClientConfig();
+  const backup = buildBackupClientConfig();
+
+  if (!primary && !backup) {
+    return {
+      ...mockAnalysis(),
+      notes: "未配置 AI_API_KEY（或 OPENAI_API_KEY），当前为演示估算值。你也可以先记录文字描述。",
+    };
+  }
+
+  return withBackupFallback(primary, backup, (client) => analyzeTextWithClient(client, description));
 }

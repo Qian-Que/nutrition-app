@@ -22,13 +22,14 @@ type LogRow = {
   fiber_gram: number | null;
   sugar_gram: number | null;
   sodium_mg: number | null;
+  nutrients_json: string | null;
   items_json: string | null;
   created_at: string;
   updated_at: string;
 };
 
 function buildDayRange(dateString: string) {
-  const start = new Date(`${dateString}T00:00:00`);
+  const start = new Date(`${dateString}T00:00:00+08:00`);
   const end = new Date(start);
   end.setDate(end.getDate() + 1);
   return { start: start.toISOString(), end: end.toISOString() };
@@ -38,12 +39,25 @@ function buildMonthRange(monthString: string) {
   const [yearRaw, monthRaw] = monthString.split("-");
   const year = Number(yearRaw);
   const month = Number(monthRaw);
-  const start = new Date(year, month - 1, 1);
-  const end = new Date(year, month, 1);
+  const start = new Date(`${year}-${String(month).padStart(2, "0")}-01T00:00:00+08:00`);
+  const endMonth = month === 12 ? 1 : month + 1;
+  const endYear = month === 12 ? year + 1 : year;
+  const end = new Date(`${endYear}-${String(endMonth).padStart(2, "0")}-01T00:00:00+08:00`);
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
 function mapLogRow(row: LogRow) {
+  const parseMaybeJson = (value: string | null) => {
+    if (!value) {
+      return null;
+    }
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  };
+
   return {
     id: row.id,
     userId: row.user_id,
@@ -60,7 +74,8 @@ function mapLogRow(row: LogRow) {
     fiberGram: row.fiber_gram,
     sugarGram: row.sugar_gram,
     sodiumMg: row.sodium_mg,
-    items: row.items_json ? JSON.parse(row.items_json) : null,
+    nutrients: parseMaybeJson(row.nutrients_json),
+    items: parseMaybeJson(row.items_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -108,7 +123,7 @@ logsRouter.get("/calendar", requireAuth, async (req, res) => {
   const rows = db
     .prepare(
       `SELECT
-        substr(logged_at, 1, 10) AS date,
+        date(logged_at, '+8 hours') AS date,
         COUNT(*) AS count,
         SUM(calories) AS calories,
         SUM(protein_gram) AS protein_gram,
@@ -116,7 +131,7 @@ logsRouter.get("/calendar", requireAuth, async (req, res) => {
         SUM(fat_gram) AS fat_gram
       FROM food_logs
       WHERE user_id = ? AND logged_at >= ? AND logged_at < ?
-      GROUP BY substr(logged_at, 1, 10)
+      GROUP BY date(logged_at, '+8 hours')
       ORDER BY date ASC`,
     )
     .all(req.user!.id, start, end) as Array<{
@@ -156,8 +171,8 @@ logsRouter.post("/", requireAuth, async (req, res) => {
     `INSERT INTO food_logs (
       id, user_id, logged_at, meal_type, note, image_uri, source, visibility,
       calories, protein_gram, carbs_gram, fat_gram, fiber_gram, sugar_gram, sodium_mg,
-      items_json, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      nutrients_json, items_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     req.user!.id,
@@ -174,6 +189,7 @@ logsRouter.post("/", requireAuth, async (req, res) => {
     data.fiberGram ?? null,
     data.sugarGram ?? null,
     data.sodiumMg ?? null,
+    data.nutrients ? JSON.stringify(data.nutrients) : null,
     data.items ? JSON.stringify(data.items) : null,
     now,
     now,
@@ -209,7 +225,7 @@ logsRouter.put("/:id", requireAuth, async (req, res) => {
     `UPDATE food_logs
      SET logged_at = ?, meal_type = ?, note = ?, image_uri = ?, source = ?, visibility = ?,
          calories = ?, protein_gram = ?, carbs_gram = ?, fat_gram = ?, fiber_gram = ?, sugar_gram = ?, sodium_mg = ?,
-         items_json = ?, updated_at = ?
+         nutrients_json = ?, items_json = ?, updated_at = ?
      WHERE id = ? AND user_id = ?`,
   ).run(
     loggedAt,
@@ -225,6 +241,7 @@ logsRouter.put("/:id", requireAuth, async (req, res) => {
     data.fiberGram ?? null,
     data.sugarGram ?? null,
     data.sodiumMg ?? null,
+    data.nutrients ? JSON.stringify(data.nutrients) : null,
     data.items ? JSON.stringify(data.items) : null,
     now,
     logId,

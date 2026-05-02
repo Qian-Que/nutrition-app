@@ -12,5 +12,11 @@ export const config = {
   aiModel: process.env.AI_MODEL ?? process.env.OPENAI_VISION_MODEL ?? "gpt-4.1-mini",
   aiImageDetail: process.env.AI_IMAGE_DETAIL ?? process.env.OPENAI_IMAGE_DETAIL ?? "auto",
   aiTimeoutMs: Number(process.env.AI_TIMEOUT_MS ?? 45000),
+  aiBackupProvider: process.env.AI_BACKUP_PROVIDER ?? process.env.AI_PROVIDER ?? "openai_compat_auto",
+  aiBackupBaseUrl: process.env.AI_BACKUP_BASE_URL ?? "",
+  aiBackupApiKey: process.env.AI_BACKUP_API_KEY ?? "",
+  aiBackupModel: process.env.AI_BACKUP_MODEL ?? "",
+  aiBackupImageDetail: process.env.AI_BACKUP_IMAGE_DETAIL ?? "",
+  aiBackupTimeoutMs: Number(process.env.AI_BACKUP_TIMEOUT_MS ?? 0),
 };
 

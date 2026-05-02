@@ -46,6 +46,7 @@ function normalizeAnalyzeErrorMessage(error: unknown) {
 nutritionRouter.post("/analyze-image", requireAuth, upload.single("image"), async (req, res) => {
   let imageBase64: string | undefined;
   let mimeType = "image/jpeg";
+  const description = typeof req.body?.description === "string" ? req.body.description.trim() : "";
 
   if (req.file) {
     imageBase64 = req.file.buffer.toString("base64");
@@ -60,11 +61,29 @@ nutritionRouter.post("/analyze-image", requireAuth, upload.single("image"), asyn
     return;
   }
 
+  if (description.length > 1000) {
+    res.status(400).json({ message: "补充描述过长，请控制在 1000 字以内" });
+    return;
+  }
+
   try {
-    const analysis = await analyzeFoodImage(imageBase64, mimeType);
+    const analysis = await analyzeFoodImage(imageBase64, mimeType, description || undefined);
     res.json({ analysis });
   } catch (error) {
     console.error("analyze-image failed:", error);
+    if (description) {
+      try {
+        const fallbackAnalysis = await analyzeFoodText(description);
+        res.json({
+          analysis: fallbackAnalysis,
+          fallback: "TEXT_ONLY",
+          message: "图片识别失败，已按文字描述估算",
+        });
+        return;
+      } catch (fallbackError) {
+        console.error("analyze-image text fallback failed:", fallbackError);
+      }
+    }
     res.status(502).json({ message: normalizeAnalyzeErrorMessage(error) });
   }
 });

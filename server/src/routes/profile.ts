@@ -9,6 +9,7 @@ export const profileRouter = Router();
 
 const getProfileStmt = db.prepare(
   `SELECT id, display_name, age, sex, height_cm, weight_kg, activity_level, goal,
+          target_weight_kg, weekly_weight_change_kg,
           target_calories, target_protein_gram, target_carbs_gram, target_fat_gram
    FROM users WHERE id = ?`,
 );
@@ -16,10 +17,18 @@ const getProfileStmt = db.prepare(
 const updateProfileStmt = db.prepare(
   `UPDATE users
    SET age = ?, sex = ?, height_cm = ?, weight_kg = ?, activity_level = ?, goal = ?,
+       target_weight_kg = ?, weekly_weight_change_kg = ?,
        target_calories = ?, target_protein_gram = ?, target_carbs_gram = ?, target_fat_gram = ?,
        updated_at = ?
    WHERE id = ?`,
 );
+
+function getLatestWeightKg(userId: string, fallback: number | null) {
+  const latest = db
+    .prepare("SELECT weight_kg FROM weight_logs WHERE user_id = ? ORDER BY logged_at DESC LIMIT 1")
+    .get(userId) as { weight_kg: number } | undefined;
+  return latest?.weight_kg ?? fallback;
+}
 
 profileRouter.get("/targets", requireAuth, async (req, res) => {
   const row = getProfileStmt.get(req.user!.id) as
@@ -32,6 +41,8 @@ profileRouter.get("/targets", requireAuth, async (req, res) => {
         weight_kg: number | null;
         activity_level: string | null;
         goal: string | null;
+        target_weight_kg: number | null;
+        weekly_weight_change_kg: number | null;
         target_calories: number | null;
         target_protein_gram: number | null;
         target_carbs_gram: number | null;
@@ -51,9 +62,11 @@ profileRouter.get("/targets", requireAuth, async (req, res) => {
       age: row.age,
       sex: row.sex,
       heightCm: row.height_cm,
-      weightKg: row.weight_kg,
+      weightKg: getLatestWeightKg(req.user!.id, row.weight_kg),
       activityLevel: row.activity_level,
       goal: row.goal,
+      targetWeightKg: row.target_weight_kg,
+      weeklyWeightChangeKg: row.weekly_weight_change_kg,
       targetCalories: row.target_calories,
       targetProteinGram: row.target_protein_gram,
       targetCarbsGram: row.target_carbs_gram,
@@ -70,11 +83,14 @@ profileRouter.put("/targets", requireAuth, async (req, res) => {
   }
 
   const input = parsed.data;
+  const effectiveWeightKg = getLatestWeightKg(req.user!.id, input.weightKg) ?? input.weightKg;
   const generatedTargets = calculateTargets({
     age: input.age,
     sex: input.sex,
     heightCm: input.heightCm,
-    weightKg: input.weightKg,
+    weightKg: effectiveWeightKg,
+    targetWeightKg: input.targetWeightKg,
+    weeklyWeightChangeKg: input.weeklyWeightChangeKg,
     activityLevel: input.activityLevel,
     goal: input.goal,
   });
@@ -90,9 +106,11 @@ profileRouter.put("/targets", requireAuth, async (req, res) => {
     input.age,
     input.sex,
     input.heightCm,
-    input.weightKg,
+    effectiveWeightKg,
     input.activityLevel,
     input.goal,
+    input.targetWeightKg ?? null,
+    input.weeklyWeightChangeKg ?? null,
     finalTargets.targetCalories,
     finalTargets.targetProteinGram,
     finalTargets.targetCarbsGram,
@@ -110,6 +128,8 @@ profileRouter.put("/targets", requireAuth, async (req, res) => {
     weight_kg: number | null;
     activity_level: string | null;
     goal: string | null;
+    target_weight_kg: number | null;
+    weekly_weight_change_kg: number | null;
     target_calories: number | null;
     target_protein_gram: number | null;
     target_carbs_gram: number | null;
@@ -126,6 +146,8 @@ profileRouter.put("/targets", requireAuth, async (req, res) => {
       weightKg: updated.weight_kg,
       activityLevel: updated.activity_level,
       goal: updated.goal,
+      targetWeightKg: updated.target_weight_kg,
+      weeklyWeightChangeKg: updated.weekly_weight_change_kg,
       targetCalories: updated.target_calories,
       targetProteinGram: updated.target_protein_gram,
       targetCarbsGram: updated.target_carbs_gram,

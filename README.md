@@ -1,198 +1,215 @@
-﻿# NutriFlow（Journable 风格饮食记录 App）
+﻿# 饮食营养助手 NutriFlow
 
-这是一个从 0 搭建的全栈移动应用示例，核心目标是：
-- 拍照/相册识别食物并估算热量和营养
-- 日常饮食记录与统计
-- 按人群和目标计算每日摄入目标
-- 注册登录 + 好友 + 群组 + 数据分享
+React Native + Express + SQLite 的饮食、体重、运动记录应用。支持图片/文字 AI 识别、目标营养计算、体重追踪、运动估算、好友动态与可见范围。
+
+## 当前版本
+
+- 移动端构建标识：`2026-05-02-r10`
+- 后端会自动迁移新增字段和表，无需手动执行 SQL。
+- 本次新增：目标体重、减重/增重效率、体重追踪图表、运动识别与记录、运动热量纳入每日剩余热量、健康分析增强。
+
+## 核心功能
+
+1. 饮食识别与记录
+- 图片识别：`POST /api/nutrition/analyze-image`
+- 文字识别：`POST /api/nutrition/analyze-text`
+- 图片可附加文字描述，提高识别准确性。
+- 记录详情包含宏量营养素、部分微量营养素和健康分析。
+
+2. 运动识别与记录
+- 发送“跑步 30 分钟”“力量训练 45 分钟”等文字后，App 会自动走运动识别。
+- 后端接口：`POST /api/exercises/analyze`
+- 运动记录接口：`GET /api/exercises`、`POST /api/exercises`、`PUT /api/exercises/:id`、`DELETE /api/exercises/:id`
+- 每日剩余热量会按 `目标热量 - 食物摄入 + 运动消耗` 计算。
+
+3. 目标营养
+- 支持年龄、身高、体重、性别、活动水平、目标类型。
+- 支持目标体重和每周体重变化速度。
+- 算法使用 Mifflin-St Jeor BMR、活动系数 TDEE、目标体重速度折算热量调整。
+- 减重速度限制为较保守的健康范围，避免过低热量目标。
+
+4. 体重追踪
+- 新增“体重”页面。
+- 支持记录体重、日期和备注。
+- 使用简单图表展示近期变化。
+- 新体重会同步更新用户当前体重，并重新计算目标营养。
+- 后端接口：`GET /api/weights`、`POST /api/weights`、`DELETE /api/weights/:id`
+
+5. 社交与可见范围
+- 记录可设置：仅自己可见、好友可见、公开。
+- 动态页用于查看好友或公开记录。
+- 好友详情可查看可见范围内的统计和日历。
 
 ## 目录结构
 
-- `server`：Node.js + Express + SQLite API
-- `mobile`：Expo React Native 客户端
+- `server`：Express + SQLite 后端
+- `mobile`：Expo React Native 源码
+- `docs`：云端部署文档
+- `E:\mobile_clean\mobile`：本机 Android 打包镜像目录，打包前需要同步最新 `mobile/App.tsx`
 
-## 功能映射
+## 本地开发
 
-1. 图片识别热量（拍照 + 相册）
-- 移动端：`mobile/App.tsx` → “识别”页，支持拍照和相册
-- 服务端：`POST /api/nutrition/analyze-image`
-- AI：默认接 OpenAI Responses API（可配置模型）
+### 启动后端
 
-2. 卡路里与营养成分
-- 服务端记录字段：`calories/proteinGram/carbsGram/fatGram/fiberGram` 等
-- 接口：`POST /api/logs`、`GET /api/logs`
-
-3. 按人群与目标动态调整每日摄入
-- 接口：`PUT /api/profile/targets`
-- 输入：年龄、性别、身高、体重、活动水平、目标（减脂/维持/增肌）
-- 输出：每日热量 + 三大营养素目标
-
-4. 注册登录 + 好友 + 群组分享
-- 认证：`/api/auth/register`、`/api/auth/login`、`/api/auth/me`
-- 好友：`/api/friends/*`
-- 群组：`/api/groups/*`
-- 好友动态：`GET /api/feed/friends`
-
-## 启动后端
-
-```bash
-cd server
-cp .env.example .env
+```powershell
+cd E:\AI\healthydiet\server
+Copy-Item .env.example .env
 npm install
 npm run dev
 ```
 
-默认地址：`http://localhost:4000`
+默认地址：`http://127.0.0.1:4000`
 
-## 无电脑独立使用（推荐）
+### 启动移动端
 
-要做到“手机离开电脑也能用”，后端必须部署到云端（不是本机）。
-
-1. 把仓库推到 GitHub（或 GitLab）。
-2. 在 Render / Railway 创建服务，服务根目录指向 `server`。
-   - Railway 新建页请选择 `GitHub Repository`
-3. 使用 Docker 部署（仓库已提供 `server/Dockerfile`）。
-4. 配置环境变量（至少这些）：
-   - `PORT=4000`
-   - `JWT_SECRET=你自己的强随机字符串`
-   - `CORS_ORIGIN=*`
-   - `SQLITE_PATH=/app/data/nutrition.db`
-   - `AI_PROVIDER` / `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`
-5. 如果使用 SQLite，请给服务挂持久化磁盘并挂载到 `/app/data`（否则重启会丢数据）。
-6. 部署完成后拿到 HTTPS 地址（例如 `https://your-api.onrender.com`）。
-7. 在手机 App 登录页“接口配置”里填这个 HTTPS 地址，点“测试连接”，成功后再登录/注册。
-
-完整图文步骤见：
-- Railway（推荐）：[`docs/云端部署完整教程-Railway.md`](docs/云端部署完整教程-Railway.md)
-- Render（备选）：[`docs/云端部署完整教程-Render.md`](docs/云端部署完整教程-Render.md)
-
-### 后端环境变量（`server/.env`）
-
-- `PORT`：API 端口（默认 4000）
-- `JWT_SECRET`：JWT 密钥
-- `SQLITE_PATH`：SQLite 文件路径
-- `AI_PROVIDER`：模型提供方类型（`openai` / `openai_compat_auto` / `openai_compat_responses` / `openai_compat_chat`）
-- `AI_BASE_URL`：模型服务地址
-- `AI_API_KEY`：模型服务密钥
-- `AI_MODEL`：模型名（支持非 GPT）
-- `AI_IMAGE_DETAIL`：图片细节等级（`low` / `high` / `auto`）
-- `AI_TIMEOUT_MS`：请求超时毫秒
-
-后端运行环境要求：
-- Node.js `>= 22`（使用 `node:sqlite`）
-
-### 多模型 API 接入步骤（不限 GPT）
-
-1. 在你要用的平台创建 API Key。  
-2. 按平台是否兼容 OpenAI 协议配置 `server/.env`。  
-3. 重启后端后，App 侧接口不变：`POST /api/nutrition/analyze-image`。
-
-OpenAI 官方示例：
-```env
-AI_PROVIDER="openai"
-AI_BASE_URL="https://api.openai.com/v1"
-AI_API_KEY="sk-..."
-AI_MODEL="gpt-4.1-mini"
-AI_IMAGE_DETAIL="auto"
-```
-
-OpenAI 兼容平台示例（可接第三方模型）：
-```env
-AI_PROVIDER="openai_compat_auto"
-AI_BASE_URL="https://openrouter.ai/api/v1"
-AI_API_KEY="你的平台密钥"
-AI_MODEL="平台支持的视觉模型ID"
-AI_IMAGE_DETAIL="auto"
-```
-
-说明：如果你不是直连 OpenAI 官方（`api.openai.com`），建议优先用 `AI_PROVIDER=openai_compat_auto`，避免平台不支持 `/responses` 导致识别失败。
-
-### 如何选模型（食物图像识别）
-
-- 低成本优先：选择轻量视觉模型（例如 mini/flash 级）
-- 准确率优先：选择高阶视觉模型（通常价格更高）
-- 如果你用第三方平台：只要该模型支持图像输入并能返回 JSON，即可接入
-
-### 图片识别常见报错（AI 接口）
-
-- 提示“当前模型平台不支持 Responses 接口”：
-  - 把 `AI_PROVIDER` 改为 `openai_compat_auto` 或 `openai_compat_chat`
-- 提示“模型无法处理这张图片”：
-  - 换清晰、完整的食物图片（避免过暗、过小、纯色图）
-  - 确认 `AI_MODEL` 是支持图像输入的视觉模型
-- 提示“AI_API_KEY 无效或已过期”：
-  - 检查并更新 `AI_API_KEY`
-- 提示“请求超时”：
-  - 检查 Railway 服务是否在线
-  - 检查 `AI_BASE_URL / AI_API_KEY / AI_MODEL` 是否正确
-  - 可适当调大 `AI_TIMEOUT_MS`（例如 60000）
-
-## 启动移动端
-
-```bash
-cd mobile
-cp .env.example .env
+```powershell
+cd E:\AI\healthydiet\mobile
+Copy-Item .env.example .env
 npm install
 npm run start
 ```
 
-### 移动端环境变量（`mobile/.env`）
+## Railway 部署后端
 
-- `EXPO_PUBLIC_API_BASE_URL`：后端 API 地址
-- `EXPO_PUBLIC_API_TIMEOUT_MS`：请求超时毫秒数（默认 30000）
+Railway 服务建议设置：
 
-说明（独立安装包）：
-- App 内“接口配置”优先级高于 `mobile/.env`
-- 只要你在登录页保存了云端地址，后续请求会使用该地址
-- 不需要把 Railway 域名再写回本地 `mobile/.env`
+- Root Directory：`server`
+- Start Command：`npm run start`
+- Healthcheck Path：`/health`
+- Public Networking Port：`4000`
 
-常见地址：
-- iOS 模拟器 / Web：`http://127.0.0.1:4000`
-- Android 模拟器：`http://10.0.2.2:4000`
-- 真机：使用你电脑局域网 IP（例如 `http://192.168.1.8:4000`）
-- 独立使用（推荐）：云端 HTTPS 地址（例如 `https://your-api.onrender.com`）
+必填变量：
 
-> 现在登录页支持直接修改并保存接口地址，也可以一键“测试连接”。
-
-### 登录超时排查（真机）
-
-如果你看到“请求超时”：
-
-1. 在手机浏览器直接打开：`http://你的电脑IP:4000/health`（本地）或 `https://你的云端域名/health`（云端）。  
-2. 若是本地 IP：关闭手机 VPN，确保手机和电脑同一 Wi-Fi。  
-3. Windows 防火墙里允许 `Node.js` 私有网络访问，或放行 4000 端口。  
-4. IP 变化后，回到登录页更新“接口配置”。  
-
-## 打包为独立 App（不依赖电脑常驻）
-
-如果你希望手机上长期独立使用，而不是每次都连 Expo 开发服务：
-
-1. 安装并登录 EAS：
-```bash
-cd mobile
-npm install
-npx eas login
+```env
+PORT=4000
+NODE_VERSION=22
+JWT_SECRET=change-to-a-long-random-secret
+CORS_ORIGIN=*
+SQLITE_PATH=/data/nutrition.db
 ```
-2. 构建 Android 安装包（已提供 `mobile/eas.json`）：
-```bash
-npx eas build -p android --profile preview
+
+AI 变量示例：
+
+```env
+AI_PROVIDER=openai_compat_auto
+AI_BASE_URL=https://你的兼容服务/v1
+AI_API_KEY=你的key
+AI_MODEL=支持图片和文字的模型
+AI_IMAGE_DETAIL=auto
+AI_TIMEOUT_MS=45000
 ```
-3. 安装 APK 后，在登录页填写你的云端 API 地址并测试连接。
 
-> 关键点：独立 App = 云端后端 + EAS 打包。只做其一都不完整。
+备用线路可选：
 
-## 已实现页面
+```env
+AI_BACKUP_PROVIDER=openai_compat_auto
+AI_BACKUP_BASE_URL=https://备用兼容服务/v1
+AI_BACKUP_API_KEY=备用key
+AI_BACKUP_MODEL=备用模型
+AI_BACKUP_IMAGE_DETAIL=auto
+AI_BACKUP_TIMEOUT_MS=45000
+```
 
-- 登录/注册
-- 今日记录（统计 + 手动添加）
-- 拍照识别并保存
-- 目标设置与计算
-- 好友请求、好友列表
-- 群组创建/加入/分享/群组动态
-- 好友动态
+部署后测试：
 
-## 说明
+```text
+https://你的railway域名/health
+```
 
-- 当前 AI 识别是“估算”，建议保留人工修正流程。
-- 社交分享的“分享到群组”需要输入日志 ID（可在记录接口结果中拿到）。
-- 这是可运行 MVP，后续可以继续扩展：条码识别、食物数据库、消息通知、图表分析、推送、云部署等。
+浏览器打开根路径出现 `接口不存在：GET /` 是正常现象，必须访问 `/health`。
+
+## Android 本地打包
+
+推荐从英文路径镜像打包：`E:\mobile_clean\mobile`。
+
+先同步源码：
+
+```powershell
+Copy-Item "E:\AI\healthydiet\mobile\App.tsx" "E:\mobile_clean\mobile\App.tsx" -Force
+```
+
+如果需要重新生成 Android 工程，先关闭 Android Studio 和占用中的终端，再执行：
+
+```powershell
+cd E:\mobile_clean\mobile
+npx expo prebuild -p android --clean
+```
+
+Release APK 打包：
+
+```powershell
+cd E:\mobile_clean\mobile\android
+.\gradlew.bat --stop
+.\gradlew.bat clean
+.\gradlew.bat assembleRelease
+```
+
+APK 输出位置：
+
+```text
+E:\mobile_clean\mobile\android\app\build\outputs\apk\release\app-release.apk
+```
+
+安装到手机：
+
+```powershell
+$env:Path += ";$env:LOCALAPPDATA\Android\Sdk\platform-tools"
+adb devices
+adb install -r E:\mobile_clean\mobile\android\app\build\outputs\apk\release\app-release.apk
+```
+
+如果安装后仍是旧版，先卸载手机上的旧 App，再安装新 APK。
+
+## 常见问题
+
+### App 请求超时
+
+检查顺序：
+
+1. 登录页接口地址是否是 Railway 的 `https://...up.railway.app`
+2. 浏览器能否打开 `https://你的域名/health`
+3. Railway 服务是否在线
+4. Railway AI 变量是否正确
+5. 手机是否安装了最新构建标识 `2026-05-02-r10`
+
+### `SDK location not found`
+
+在 `E:\mobile_clean\mobile\android\local.properties` 写入：
+
+```properties
+sdk.dir=C:\\Users\\你的用户名\\AppData\\Local\\Android\\Sdk
+```
+
+### `adb` 命令找不到
+
+```powershell
+$env:Path += ";$env:LOCALAPPDATA\Android\Sdk\platform-tools"
+adb devices
+```
+
+### `EBUSY ... classes.dex`
+
+关闭 Android Studio、模拟器、占用该目录的终端，然后执行：
+
+```powershell
+cd E:\mobile_clean\mobile\android
+.\gradlew.bat --stop
+.\gradlew.bat clean
+```
+
+### AI 识别失败
+
+先确认后端接口可用，再检查 Railway 变量：
+
+- `AI_BASE_URL` 必须以 `/v1` 结尾，除非服务商明确不需要。
+- `AI_MODEL` 必须支持当前输入类型；图片识别必须使用支持视觉的模型。
+- 第三方兼容平台建议使用 `AI_PROVIDER=openai_compat_auto`。
+- 如果主线路不稳定，配置 `AI_BACKUP_*`。
+
+## 健康算法说明
+
+- 基础代谢：Mifflin-St Jeor 公式。
+- 维护热量：BMR 乘以活动系数得到 TDEE。
+- 体重目标：按每周目标变化折算每日热量调整，并设置安全上限和最低热量保护。
+- 运动热量：使用 AI 估算运动类型、时长、强度和 MET，再按体重与时长估算消耗。
+- 所有结果只适合日常记录和估算，不等同于医生或注册营养师建议。

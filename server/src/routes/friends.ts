@@ -23,12 +23,24 @@ type FriendLogRow = {
   fiber_gram: number | null;
   sugar_gram: number | null;
   sodium_mg: number | null;
+  nutrients_json: string | null;
   items_json: string | null;
   created_at: string;
   updated_at: string;
 };
 
 function mapFriendLogRow(row: FriendLogRow) {
+  const parseMaybeJson = (value: string | null) => {
+    if (!value) {
+      return null;
+    }
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  };
+
   return {
     id: row.id,
     userId: row.user_id,
@@ -45,7 +57,8 @@ function mapFriendLogRow(row: FriendLogRow) {
     fiberGram: row.fiber_gram,
     sugarGram: row.sugar_gram,
     sodiumMg: row.sodium_mg,
-    items: row.items_json ? JSON.parse(row.items_json) : null,
+    nutrients: parseMaybeJson(row.nutrients_json),
+    items: parseMaybeJson(row.items_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -60,6 +73,35 @@ function withTransaction(fn: () => void) {
     db.exec("ROLLBACK");
     throw error;
   }
+}
+
+function buildDayRange(dateString: string) {
+  const start = new Date(`${dateString}T00:00:00+08:00`);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+function buildMonthRange(monthString: string) {
+  const [yearRaw, monthRaw] = monthString.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const start = new Date(`${year}-${String(month).padStart(2, "0")}-01T00:00:00+08:00`);
+  const endMonth = month === 12 ? 1 : month + 1;
+  const endYear = month === 12 ? year + 1 : year;
+  const end = new Date(`${endYear}-${String(endMonth).padStart(2, "0")}-01T00:00:00+08:00`);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+function ensureFriendAccess(userId: string, friendId: string) {
+  const isFriend = db
+    .prepare(
+      `SELECT id FROM friendships
+       WHERE (user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?)`,
+    )
+    .get(userId, friendId, friendId, userId) as { id: string } | undefined;
+
+  return Boolean(isFriend);
 }
 
 friendsRouter.get("/", requireAuth, async (req, res) => {
@@ -86,14 +128,7 @@ friendsRouter.get("/:friendId/profile", requireAuth, async (req, res) => {
   const userId = req.user!.id;
   const friendId = String(req.params.friendId);
 
-  const isFriend = db
-    .prepare(
-      `SELECT id FROM friendships
-       WHERE (user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?)`,
-    )
-    .get(userId, friendId, friendId, userId) as { id: string } | undefined;
-
-  if (!isFriend) {
+  if (!ensureFriendAccess(userId, friendId)) {
     res.status(403).json({ message: "仅可查看好友详情" });
     return;
   }
@@ -190,6 +225,100 @@ friendsRouter.get("/:friendId/profile", requireAuth, async (req, res) => {
     },
     recentLogs,
   });
+});
+
+friendsRouter.get("/:friendId/logs", requireAuth, async (req, res) => {
+  const userId = req.user!.id;
+  const friendId = String(req.params.friendId);
+
+  if (!ensureFriendAccess(userId, friendId)) {
+    res.status(403).json({ message: "仅可查看好友记录" });
+    return;
+  }
+
+  const date = typeof req.query.date === "string" ? req.query.date : undefined;
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    res.status(400).json({ message: "date 参数格式错误，应为 YYYY-MM-DD" });
+    return;
+  }
+
+  const baseQuery =
+    "SELECT * FROM food_logs WHERE user_id = ? AND visibility IN ('FRIENDS', 'PUBLIC')" +
+    (date ? " AND logged_at >= ? AND logged_at < ?" : "") +
+    " ORDER BY logged_at DESC";
+
+  const rows = date
+    ? (db.prepare(baseQuery).all(friendId, buildDayRange(date).start, buildDayRange(date).end) as FriendLogRow[])
+    : (db.prepare(baseQuery).all(friendId) as FriendLogRow[]);
+
+  const logs = rows.map((row) => mapFriendLogRow(row));
+
+  const summary = logs.reduce(
+    (acc, item) => {
+      acc.calories += Number(item.calories);
+      acc.proteinGram += Number(item.proteinGram);
+      acc.carbsGram += Number(item.carbsGram);
+      acc.fatGram += Number(item.fatGram);
+      acc.fiberGram += Number(item.fiberGram ?? 0);
+      return acc;
+    },
+    { calories: 0, proteinGram: 0, carbsGram: 0, fatGram: 0, fiberGram: 0 },
+  );
+
+  res.json({ logs, summary });
+});
+
+friendsRouter.get("/:friendId/calendar", requireAuth, async (req, res) => {
+  const userId = req.user!.id;
+  const friendId = String(req.params.friendId);
+
+  if (!ensureFriendAccess(userId, friendId)) {
+    res.status(403).json({ message: "仅可查看好友记录" });
+    return;
+  }
+
+  const month = typeof req.query.month === "string" ? req.query.month : "";
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    res.status(400).json({ message: "month 参数格式错误，应为 YYYY-MM" });
+    return;
+  }
+
+  const { start, end } = buildMonthRange(month);
+  const rows = db
+    .prepare(
+      `SELECT
+        date(logged_at, '+8 hours') AS date,
+        COUNT(*) AS count,
+        SUM(calories) AS calories,
+        SUM(protein_gram) AS protein_gram,
+        SUM(carbs_gram) AS carbs_gram,
+        SUM(fat_gram) AS fat_gram
+      FROM food_logs
+      WHERE user_id = ?
+        AND visibility IN ('FRIENDS', 'PUBLIC')
+        AND logged_at >= ? AND logged_at < ?
+      GROUP BY date(logged_at, '+8 hours')
+      ORDER BY date ASC`,
+    )
+    .all(friendId, start, end) as Array<{
+    date: string;
+    count: number;
+    calories: number | null;
+    protein_gram: number | null;
+    carbs_gram: number | null;
+    fat_gram: number | null;
+  }>;
+
+  const days = rows.map((row) => ({
+    date: row.date,
+    count: Number(row.count ?? 0),
+    calories: Number(row.calories ?? 0),
+    proteinGram: Number(row.protein_gram ?? 0),
+    carbsGram: Number(row.carbs_gram ?? 0),
+    fatGram: Number(row.fat_gram ?? 0),
+  }));
+
+  res.json({ month, days });
 });
 
 friendsRouter.get("/requests", requireAuth, async (req, res) => {

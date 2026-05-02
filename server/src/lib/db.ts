@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS users (
   weight_kg REAL,
   activity_level TEXT,
   goal TEXT DEFAULT 'MAINTAIN',
+  target_weight_kg REAL,
+  weekly_weight_change_kg REAL,
   target_calories INTEGER,
   target_protein_gram REAL,
   target_carbs_gram REAL,
@@ -50,12 +52,43 @@ CREATE TABLE IF NOT EXISTS food_logs (
   fiber_gram REAL,
   sugar_gram REAL,
   sodium_mg REAL,
+  nutrients_json TEXT,
   items_json TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_food_logs_user_logged_at ON food_logs (user_id, logged_at DESC);
+
+CREATE TABLE IF NOT EXISTS exercise_logs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  logged_at TEXT NOT NULL,
+  exercise_type TEXT NOT NULL,
+  duration_min REAL NOT NULL,
+  intensity TEXT NOT NULL,
+  met REAL NOT NULL,
+  calories REAL NOT NULL,
+  note TEXT,
+  source TEXT NOT NULL,
+  visibility TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_exercise_logs_user_logged_at ON exercise_logs (user_id, logged_at DESC);
+
+CREATE TABLE IF NOT EXISTS weight_logs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  logged_at TEXT NOT NULL,
+  weight_kg REAL NOT NULL,
+  note TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_weight_logs_user_logged_at ON weight_logs (user_id, logged_at DESC);
 
 CREATE TABLE IF NOT EXISTS friend_requests (
   id TEXT PRIMARY KEY,
@@ -112,7 +145,39 @@ CREATE TABLE IF NOT EXISTS group_posts (
   FOREIGN KEY (food_log_id) REFERENCES food_logs(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_group_posts_group_created ON group_posts (group_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS password_reset_codes (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  email TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_password_reset_codes_user_created ON password_reset_codes (user_id, created_at DESC);
 `);
+
+function getTableColumns(tableName: string): string[] {
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  return rows.map((row) => row.name);
+}
+
+function ensureColumn(tableName: string, columnName: string, columnDefinition: string) {
+  const columns = getTableColumns(tableName);
+  if (!columns.includes(columnName)) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnDefinition}`);
+  }
+}
+
+ensureColumn("food_logs", "fiber_gram", "fiber_gram REAL");
+ensureColumn("food_logs", "sugar_gram", "sugar_gram REAL");
+ensureColumn("food_logs", "sodium_mg", "sodium_mg REAL");
+ensureColumn("food_logs", "items_json", "items_json TEXT");
+ensureColumn("food_logs", "nutrients_json", "nutrients_json TEXT");
+ensureColumn("users", "target_weight_kg", "target_weight_kg REAL");
+ensureColumn("users", "weekly_weight_change_kg", "weekly_weight_change_kg REAL");
 
 export function createId() {
   return randomUUID().replace(/-/g, "");

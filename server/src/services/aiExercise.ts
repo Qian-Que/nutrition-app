@@ -1,0 +1,258 @@
+import { config } from "../config";
+
+export type ExerciseIntensity = "LOW" | "MODERATE" | "HIGH";
+
+export type ExerciseAnalysis = {
+  exerciseType: string;
+  durationMin: number;
+  intensity: ExerciseIntensity;
+  met: number;
+  calories: number;
+  confidence: number;
+  notes: string;
+};
+
+type AIClientConfig = {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  timeoutMs: number;
+  label: string;
+};
+
+function normalizeBaseUrl(url: string): string {
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function toNumber(value: unknown, fallback: number) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export function estimateExerciseCalories(met: number, weightKg: number, durationMin: number) {
+  return Math.round(clamp(met, 1, 20) * Math.max(weightKg, 30) * (Math.max(durationMin, 1) / 60));
+}
+
+function buildPrimaryClientConfig(): AIClientConfig | null {
+  const apiKey = String(config.aiApiKey ?? "").trim();
+  if (!apiKey) {
+    return null;
+  }
+
+  return {
+    baseUrl: normalizeBaseUrl(config.aiBaseUrl),
+    apiKey,
+    model: config.aiModel,
+    timeoutMs: config.aiTimeoutMs,
+    label: "主线路",
+  };
+}
+
+function buildBackupClientConfig(): AIClientConfig | null {
+  const backupKey = String(config.aiBackupApiKey ?? "").trim();
+  const backupBaseUrl = String(config.aiBackupBaseUrl ?? "").trim();
+  const backupModel = String(config.aiBackupModel ?? "").trim();
+  const backupTouched = Boolean(backupKey || backupBaseUrl || backupModel);
+  if (!backupTouched) {
+    return null;
+  }
+
+  const apiKey = backupKey || String(config.aiApiKey ?? "").trim();
+  if (!apiKey) {
+    return null;
+  }
+
+  return {
+    baseUrl: normalizeBaseUrl(backupBaseUrl || config.aiBaseUrl),
+    apiKey,
+    model: backupModel || config.aiModel,
+    timeoutMs: config.aiBackupTimeoutMs > 0 ? config.aiBackupTimeoutMs : config.aiTimeoutMs,
+    label: "备用线路",
+  };
+}
+
+function buildPrompt(description: string, weightKg: number) {
+  return [
+    "你是运动营养助手。请从用户描述中识别本次运动，并估算运动强度与 MET。",
+    "只返回 JSON，不要返回解释文字。",
+    "JSON 字段：exerciseType, durationMin, intensity, met, confidence, notes。",
+    "intensity 只能是 LOW、MODERATE、HIGH。",
+    "durationMin 必须是分钟；如果用户没有明确时长，请根据描述保守估计。",
+    "MET 请用常见运动代谢当量估算：散步约 2.5-3.5，快走约 4-5，跑步约 7-12，骑行约 5-10，力量训练约 3.5-6，游泳约 6-10。",
+    `用户当前体重：${weightKg}kg。`,
+    `用户描述：${description}`,
+  ].join("\n");
+}
+
+async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`AI 接口调用失败（${response.status}）：${text}`);
+    }
+    return response.json();
+  } catch (error) {
+    if ((error as Error).name === "AbortError") {
+      throw new Error(`AI 请求超时（>${timeoutMs}ms）`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractText(response: any) {
+  const content = response?.choices?.[0]?.message?.content;
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content.map((item) => item?.text ?? item?.content ?? "").join("\n");
+  }
+  return "";
+}
+
+function extractJsonText(raw: string) {
+  const text = raw.trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    return fenced[1].trim();
+  }
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    return text.slice(first, last + 1);
+  }
+  return text;
+}
+
+function normalizeAnalysis(raw: any, weightKg: number, fallbackDescription: string): ExerciseAnalysis {
+  const exerciseType =
+    typeof raw?.exerciseType === "string" && raw.exerciseType.trim()
+      ? raw.exerciseType.trim().slice(0, 60)
+      : fallbackDescription.slice(0, 30) || "运动";
+  const durationMin = clamp(toNumber(raw?.durationMin, 30), 1, 600);
+  const intensity: ExerciseIntensity =
+    raw?.intensity === "LOW" || raw?.intensity === "HIGH" || raw?.intensity === "MODERATE" ? raw.intensity : "MODERATE";
+  const defaultMet = intensity === "HIGH" ? 8 : intensity === "LOW" ? 3 : 5;
+  const met = clamp(toNumber(raw?.met, defaultMet), 1, 20);
+  return {
+    exerciseType,
+    durationMin: Math.round(durationMin),
+    intensity,
+    met: Number(met.toFixed(1)),
+    calories: estimateExerciseCalories(met, weightKg, durationMin),
+    confidence: clamp(toNumber(raw?.confidence, 0.65), 0, 1),
+    notes: typeof raw?.notes === "string" && raw.notes.trim() ? raw.notes.trim() : "按运动类型、体重和时长估算消耗。",
+  };
+}
+
+function heuristicExercise(description: string, weightKg: number): ExerciseAnalysis {
+  const text = description.toLowerCase();
+  const durationMatch = description.match(/(\d+(?:\.\d+)?)\s*(分钟|min|mins|minute|minutes|小时|h|hour|hours)/i);
+  let durationMin = 30;
+  if (durationMatch) {
+    const value = Number(durationMatch[1]);
+    const unit = durationMatch[2].toLowerCase();
+    durationMin = unit.includes("小时") || unit === "h" || unit.includes("hour") ? value * 60 : value;
+  }
+
+  let exerciseType = "运动";
+  let met = 5;
+  let intensity: ExerciseIntensity = "MODERATE";
+  if (/跑|run|jog/.test(text)) {
+    exerciseType = "跑步";
+    met = 8.5;
+    intensity = "HIGH";
+  } else if (/快走|walk|散步|走路/.test(text)) {
+    exerciseType = /快走/.test(text) ? "快走" : "步行";
+    met = /快走/.test(text) ? 4.3 : 3.2;
+    intensity = /快走/.test(text) ? "MODERATE" : "LOW";
+  } else if (/骑|bike|cycling|单车/.test(text)) {
+    exerciseType = "骑行";
+    met = 6.8;
+  } else if (/游泳|swim/.test(text)) {
+    exerciseType = "游泳";
+    met = 7.5;
+    intensity = "HIGH";
+  } else if (/力量|撸铁|健身|深蹲|卧推|training|strength|gym/.test(text)) {
+    exerciseType = "力量训练";
+    met = 4.8;
+  } else if (/瑜伽|yoga/.test(text)) {
+    exerciseType = "瑜伽";
+    met = 2.8;
+    intensity = "LOW";
+  }
+
+  return normalizeAnalysis({ exerciseType, durationMin, intensity, met, confidence: 0.4 }, weightKg, description);
+}
+
+async function analyzeWithClient(client: AIClientConfig, description: string, weightKg: number) {
+  const payload = await fetchJsonWithTimeout(
+    `${client.baseUrl}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${client.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: client.model,
+        temperature: 0.15,
+        max_tokens: 500,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: "你是运动消耗估算助手。必须只返回 JSON。" },
+          { role: "user", content: buildPrompt(description, weightKg) },
+        ],
+      }),
+    },
+    client.timeoutMs,
+  );
+
+  const text = extractText(payload);
+  if (!text) {
+    throw new Error("AI 未返回有效内容");
+  }
+
+  return normalizeAnalysis(JSON.parse(extractJsonText(text)), weightKg, description);
+}
+
+export async function analyzeExerciseText(description: string, weightKg: number) {
+  const primary = buildPrimaryClientConfig();
+  const backup = buildBackupClientConfig();
+  if (!primary && !backup) {
+    return heuristicExercise(description, weightKg);
+  }
+
+  let primaryError: Error | null = null;
+  if (primary) {
+    try {
+      return await analyzeWithClient(primary, description, weightKg);
+    } catch (error) {
+      primaryError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  if (backup) {
+    try {
+      return await analyzeWithClient(backup, description, weightKg);
+    } catch (error) {
+      const backupError = error instanceof Error ? error : new Error(String(error));
+      throw new Error(
+        primaryError
+          ? `${primary?.label ?? "主线路"}失败：${primaryError.message}；${backup.label}失败：${backupError.message}`
+          : backupError.message,
+      );
+    }
+  }
+
+  throw primaryError ?? new Error("未配置可用 AI 线路");
+}
