@@ -41,7 +41,7 @@ export type NutritionAnalysis = {
 
 type NutritionTotals = NutritionAnalysis["totals"];
 
-type AIProvider = "openai" | "openai_compat_auto" | "openai_compat_responses" | "openai_compat_chat";
+type AIProvider = "openai" | "openai_compat_auto" | "openai_compat_responses" | "openai_compat_chat" | "gemini";
 
 export type AIUsage = {
   provider: string;
@@ -284,6 +284,10 @@ function enrichTotalsByHeuristics(totals: NutritionTotals, items: NutritionItem[
 function resolveProvider(rawInput?: string): AIProvider {
   const raw = String(rawInput ?? config.aiProvider ?? "openai").toLowerCase();
 
+  if (raw === "gemini" || raw === "gemini_native" || raw === "google_gemini") {
+    return "gemini";
+  }
+
   if (
     raw === "openai" ||
     raw === "openai_compat_auto" ||
@@ -304,11 +308,25 @@ function resolveImageDetail(rawInput?: string): "low" | "high" | "auto" {
   return "auto";
 }
 
-function normalizeBaseUrl(url: string): string {
+function shouldUseGeminiNative(provider: AIProvider, rawBaseUrl: string, model: string) {
+  return (
+    provider === "gemini" ||
+    (provider === "openai_compat_auto" && /\/v1beta\/models\/?$/i.test(rawBaseUrl) && /^gemini-/i.test(model.trim()))
+  );
+}
+
+function normalizeBaseUrl(url: string, provider: AIProvider): string {
   let normalized = String(url ?? "").trim().replace(/\/+$/, "");
-  normalized = normalized.replace(/\/v1beta\/models$/i, "/v1beta/openai");
-  if (/\/v1beta$/i.test(normalized)) {
-    normalized = `${normalized}/openai`;
+  if (provider === "gemini") {
+    normalized = normalized.replace(/\/v1beta\/openai$/i, "/v1beta/models");
+    if (/\/v1beta$/i.test(normalized)) {
+      normalized = `${normalized}/models`;
+    }
+  } else {
+    normalized = normalized.replace(/\/v1beta\/models$/i, "/v1beta/openai");
+    if (/\/v1beta$/i.test(normalized)) {
+      normalized = `${normalized}/openai`;
+    }
   }
   return normalized;
 }
@@ -325,11 +343,13 @@ function buildPrimaryClientConfig(): AIClientConfig | null {
   if (!apiKey) {
     return null;
   }
-  const baseUrl = normalizeBaseUrl(config.aiBaseUrl);
-  const provider = normalizeProviderForBaseUrl(resolveProvider(config.aiProvider), baseUrl);
+  const rawProvider = resolveProvider(config.aiProvider);
+  const provider = shouldUseGeminiNative(rawProvider, config.aiBaseUrl, config.aiModel) ? "gemini" : rawProvider;
+  const baseUrl = normalizeBaseUrl(config.aiBaseUrl, provider);
+  const effectiveProvider = normalizeProviderForBaseUrl(provider, baseUrl);
 
   return {
-    provider,
+    provider: effectiveProvider,
     baseUrl,
     apiKey,
     model: config.aiModel,
@@ -357,14 +377,18 @@ function buildBackupClientConfig(): AIClientConfig | null {
 
   const timeoutMs = Number(config.aiBackupTimeoutMs);
   const effectiveTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : config.aiTimeoutMs;
-  const baseUrl = normalizeBaseUrl(backupBaseUrl || config.aiBaseUrl);
-  const provider = normalizeProviderForBaseUrl(resolveProvider(config.aiBackupProvider || config.aiProvider), baseUrl);
+  const backupRawBaseUrl = backupBaseUrl || config.aiBaseUrl;
+  const backupEffectiveModel = backupModel || config.aiModel;
+  const rawProvider = resolveProvider(config.aiBackupProvider || config.aiProvider);
+  const provider = shouldUseGeminiNative(rawProvider, backupRawBaseUrl, backupEffectiveModel) ? "gemini" : rawProvider;
+  const baseUrl = normalizeBaseUrl(backupRawBaseUrl, provider);
+  const effectiveProvider = normalizeProviderForBaseUrl(provider, baseUrl);
 
   return {
-    provider,
+    provider: effectiveProvider,
     baseUrl,
     apiKey,
-    model: backupModel || config.aiModel,
+    model: backupEffectiveModel,
     imageDetail: resolveImageDetail(config.aiBackupImageDetail || config.aiImageDetail),
     timeoutMs: effectiveTimeoutMs,
     label: "备用线路",
@@ -480,6 +504,27 @@ function extractTextOutputFromChatCompletions(response: any): string | null {
   }
 
   return null;
+}
+
+function extractTextOutputFromGemini(response: any): string | null {
+  const parts = response?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) {
+    return null;
+  }
+  const text = parts
+    .map((part) => (typeof part?.text === "string" ? part.text : ""))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  return text.length > 0 ? text : null;
+}
+
+function buildGeminiGenerateContentUrl(baseUrl: string, model: string, apiKey: string) {
+  const normalizedModel = model.trim().replace(/^models\//i, "");
+  const endpoint = /\/models$/i.test(baseUrl)
+    ? `${baseUrl}/${normalizedModel}:generateContent`
+    : `${baseUrl}/models/${normalizedModel}:generateContent`;
+  return `${endpoint}?key=${encodeURIComponent(apiKey)}`;
 }
 
 function extractJsonText(rawText: string): string {
@@ -742,6 +787,58 @@ async function callChatCompletionsApi(params: {
   return outputText;
 }
 
+async function callGeminiGenerateContentApi(params: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  prompt: string;
+  base64Image?: string;
+  mimeType?: string;
+  timeoutMs: number;
+}) {
+  const { baseUrl, apiKey, model, prompt, base64Image, mimeType, timeoutMs } = params;
+  const parts: Array<Record<string, unknown>> = [{ text: prompt }];
+  if (base64Image) {
+    parts.push({
+      inlineData: {
+        mimeType: mimeType || "image/jpeg",
+        data: base64Image,
+      },
+    });
+  }
+
+  const payload = await fetchJsonWithTimeout(
+    buildGeminiGenerateContentUrl(baseUrl, model, apiKey),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts,
+          },
+        ],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 1000,
+          responseMimeType: "application/json",
+        },
+      }),
+    },
+    timeoutMs,
+  );
+
+  const outputText = extractTextOutputFromGemini(payload);
+  if (!outputText) {
+    throw new Error("Gemini 未返回有效内容");
+  }
+
+  return outputText;
+}
+
 async function callResponsesApiText(params: {
   baseUrl: string;
   apiKey: string;
@@ -863,7 +960,17 @@ async function analyzeImageWithClient(
   const imageDataUrl = `data:${mimeType};base64,${base64Image}`;
   let rawText: string;
 
-  if (client.provider === "openai") {
+  if (client.provider === "gemini") {
+    rawText = await callGeminiGenerateContentApi({
+      baseUrl: client.baseUrl,
+      apiKey: client.apiKey,
+      model: client.model,
+      prompt,
+      base64Image,
+      mimeType,
+      timeoutMs: client.timeoutMs,
+    });
+  } else if (client.provider === "openai") {
     rawText = await callResponsesApi({
       baseUrl: client.baseUrl,
       apiKey: client.apiKey,
@@ -931,7 +1038,15 @@ async function analyzeTextWithClient(client: AIClientConfig, description: string
   const prompt = buildTextPrompt(description);
   let rawText: string;
 
-  if (client.provider === "openai") {
+  if (client.provider === "gemini") {
+    rawText = await callGeminiGenerateContentApi({
+      baseUrl: client.baseUrl,
+      apiKey: client.apiKey,
+      model: client.model,
+      prompt,
+      timeoutMs: client.timeoutMs,
+    });
+  } else if (client.provider === "openai") {
     rawText = await callResponsesApiText({
       baseUrl: client.baseUrl,
       apiKey: client.apiKey,
@@ -994,17 +1109,23 @@ async function withBackupFallback<T>(
 
   if (primary) {
     try {
-      return await action(primary);
+      const result = await action(primary);
+      console.info(`[ai] ${primary.label} success provider=${primary.provider} model=${primary.model}`);
+      return result;
     } catch (error) {
       primaryError = error instanceof Error ? error : new Error(String(error));
+      console.warn(`[ai] ${primary.label} failed provider=${primary.provider} model=${primary.model}: ${primaryError.message}`);
     }
   }
 
   if (backup) {
     try {
-      return await action(backup);
+      const result = await action(backup);
+      console.info(`[ai] ${backup.label} success provider=${backup.provider} model=${backup.model}`);
+      return result;
     } catch (error) {
       const backupError = error instanceof Error ? error : new Error(String(error));
+      console.warn(`[ai] ${backup.label} failed provider=${backup.provider} model=${backup.model}: ${backupError.message}`);
       if (primaryError) {
         const primaryLabel = primary?.label ?? "主线路";
         throw new Error(`${primaryLabel}失败：${primaryError.message}；${backup.label}失败：${backupError.message}`);
