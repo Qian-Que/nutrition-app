@@ -19,6 +19,9 @@ type ExerciseRow = {
   note: string | null;
   source: string;
   visibility: string;
+  ai_provider: string | null;
+  ai_model: string | null;
+  ai_route: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -43,6 +46,9 @@ function mapExerciseRow(row: ExerciseRow) {
     note: row.note,
     source: row.source,
     visibility: row.visibility,
+    aiProvider: row.ai_provider,
+    aiModel: row.ai_model,
+    aiRoute: row.ai_route,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -121,8 +127,8 @@ exercisesRouter.post("/", requireAuth, async (req, res) => {
   db.prepare(
     `INSERT INTO exercise_logs (
       id, user_id, logged_at, exercise_type, duration_min, intensity, met, calories,
-      note, source, visibility, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      note, source, visibility, ai_provider, ai_model, ai_route, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     req.user!.id,
@@ -135,6 +141,9 @@ exercisesRouter.post("/", requireAuth, async (req, res) => {
     data.note ?? null,
     data.source,
     data.visibility,
+    data.aiProvider ?? null,
+    data.aiModel ?? null,
+    data.aiRoute ?? null,
     now,
     now,
   );
@@ -152,8 +161,10 @@ exercisesRouter.put("/:id", requireAuth, async (req, res) => {
   }
 
   const existing = db
-    .prepare("SELECT id, logged_at FROM exercise_logs WHERE id = ? AND user_id = ?")
-    .get(id, req.user!.id) as { id: string; logged_at: string } | undefined;
+    .prepare("SELECT id, logged_at, ai_provider, ai_model, ai_route FROM exercise_logs WHERE id = ? AND user_id = ?")
+    .get(id, req.user!.id) as
+    | { id: string; logged_at: string; ai_provider: string | null; ai_model: string | null; ai_route: string | null }
+    | undefined;
   if (!existing) {
     res.status(404).json({ message: "运动记录不存在" });
     return;
@@ -165,7 +176,7 @@ exercisesRouter.put("/:id", requireAuth, async (req, res) => {
   db.prepare(
     `UPDATE exercise_logs
      SET logged_at = ?, exercise_type = ?, duration_min = ?, intensity = ?, met = ?, calories = ?,
-         note = ?, source = ?, visibility = ?, updated_at = ?
+         note = ?, source = ?, visibility = ?, ai_provider = ?, ai_model = ?, ai_route = ?, updated_at = ?
      WHERE id = ? AND user_id = ?`,
   ).run(
     loggedAt,
@@ -177,6 +188,9 @@ exercisesRouter.put("/:id", requireAuth, async (req, res) => {
     data.note ?? null,
     data.source,
     data.visibility,
+    data.aiProvider ?? existing.ai_provider ?? null,
+    data.aiModel ?? existing.ai_model ?? null,
+    data.aiRoute ?? existing.ai_route ?? null,
     now,
     id,
     req.user!.id,

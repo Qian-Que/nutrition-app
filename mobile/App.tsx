@@ -24,7 +24,7 @@ const API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v2";
 const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-05-02-r13";
+const APP_BUILD_LABEL = "2026-05-07-r14";
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
 const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS ?? 140000);
@@ -114,9 +114,16 @@ type NutritionAnalysis = {
   } & Required<MicroNutrients>;
   confidence: number;
   notes: string;
+  ai?: AIUsage | null;
 };
 
 type NutritionItem = NutritionAnalysis["items"][number];
+
+type AIUsage = {
+  provider?: string | null;
+  model?: string | null;
+  route?: string | null;
+};
 
 type AiConversationMessage = {
   id: string;
@@ -151,6 +158,9 @@ type FoodLog = {
   items?: unknown;
   note?: string;
   imageUri?: string | null;
+  aiProvider?: string | null;
+  aiModel?: string | null;
+  aiRoute?: string | null;
 };
 
 type ExerciseIntensity = "LOW" | "MODERATE" | "HIGH";
@@ -166,6 +176,9 @@ type ExerciseLog = {
   note?: string | null;
   source: "MANUAL" | "AI";
   visibility: Visibility;
+  aiProvider?: string | null;
+  aiModel?: string | null;
+  aiRoute?: string | null;
 };
 
 type ExerciseAnalysis = {
@@ -176,6 +189,7 @@ type ExerciseAnalysis = {
   calories: number;
   confidence: number;
   notes: string;
+  ai?: AIUsage | null;
 };
 
 type WeightLog = {
@@ -646,6 +660,11 @@ function estimateFromDescription(description: string, hasImage: boolean): Nutrit
     },
     confidence: 0.35,
     notes: "AI 接口超时，已按文字与上下文进行本地估算，建议后续手动微调。",
+    ai: {
+      provider: "local",
+      model: "本地估算",
+      route: "本地",
+    },
   });
 }
 
@@ -971,6 +990,7 @@ function normalizeExerciseAnalysis(raw: unknown): ExerciseAnalysis {
   const data = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const intensity =
     data.intensity === "LOW" || data.intensity === "HIGH" || data.intensity === "MODERATE" ? data.intensity : "MODERATE";
+  const rawAi = data.ai && typeof data.ai === "object" ? (data.ai as Record<string, unknown>) : null;
   return {
     exerciseType:
       typeof data.exerciseType === "string" && data.exerciseType.trim().length > 0 ? data.exerciseType.trim() : "运动",
@@ -980,6 +1000,13 @@ function normalizeExerciseAnalysis(raw: unknown): ExerciseAnalysis {
     calories: Math.max(0, safeRounded(data.calories, 0, 0)),
     confidence: clamp(safeNumber(data.confidence, 0.6), 0, 1),
     notes: typeof data.notes === "string" && data.notes.trim().length > 0 ? data.notes.trim() : "按运动类型、时长和体重估算。",
+    ai: rawAi
+      ? {
+          provider: typeof rawAi.provider === "string" ? rawAi.provider : null,
+          model: typeof rawAi.model === "string" ? rawAi.model : null,
+          route: typeof rawAi.route === "string" ? rawAi.route : null,
+        }
+      : null,
   };
 }
 
@@ -1033,6 +1060,26 @@ function formatSignedKcalChange(value: number | null) {
     return `较前日 ${rounded} 千卡`;
   }
   return "较前日 0 千卡";
+}
+
+function formatAIUsageText(source: { aiProvider?: string | null; aiModel?: string | null; aiRoute?: string | null } | null | undefined) {
+  const model = source?.aiModel?.trim();
+  const provider = source?.aiProvider?.trim();
+  const route = source?.aiRoute?.trim();
+  if (!model && !provider && !route) {
+    return "识别模型：未记录（旧记录或手动记录）";
+  }
+  const left = route ? `${route}` : provider || "AI";
+  const right = model ? ` · ${model}` : "";
+  return `识别模型：${left}${right}`;
+}
+
+function aiUsageFromAnalysis(analysis: { ai?: AIUsage | null } | null | undefined) {
+  return {
+    aiProvider: analysis?.ai?.provider ?? undefined,
+    aiModel: analysis?.ai?.model ?? undefined,
+    aiRoute: analysis?.ai?.route ?? undefined,
+  };
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -1329,6 +1376,7 @@ function normalizeClientAnalysis(raw: unknown): NutritionAnalysis {
     totals?: Record<string, unknown>;
     confidence?: unknown;
     notes?: unknown;
+    ai?: unknown;
   };
   const rawItems = Array.isArray(data.items) ? data.items : [];
   const items: NutritionAnalysis["items"] = [];
@@ -1389,11 +1437,19 @@ function normalizeClientAnalysis(raw: unknown): NutritionAnalysis {
     vitaminDIU: safeNumber(totalsRaw.vitaminDIU, 0),
   };
 
+  const rawAi = data.ai && typeof data.ai === "object" ? (data.ai as Record<string, unknown>) : null;
   return {
     items,
     totals,
     confidence: clamp(safeNumber(data.confidence, 0.5), 0, 1),
     notes: typeof data.notes === "string" && data.notes.trim().length > 0 ? data.notes.trim() : "已按可用信息自动估算。",
+    ai: rawAi
+      ? {
+          provider: typeof rawAi.provider === "string" ? rawAi.provider : null,
+          model: typeof rawAi.model === "string" ? rawAi.model : null,
+          route: typeof rawAi.route === "string" ? rawAi.route : null,
+        }
+      : null,
   };
 }
 
@@ -2368,6 +2424,9 @@ function DashboardScreen({
             sodiumMg: Number(targetLog.sodiumMg ?? targetLog.nutrients?.sodiumMg ?? 0),
             nutrients: targetLog.nutrients ?? undefined,
             items: targetLog.items,
+            aiProvider: targetLog.aiProvider ?? undefined,
+            aiModel: targetLog.aiModel ?? undefined,
+            aiRoute: targetLog.aiRoute ?? undefined,
           }),
         },
         token,
@@ -2459,6 +2518,9 @@ function DashboardScreen({
             note: editExerciseNote.trim() || undefined,
             source: targetExercise.source,
             visibility: editExerciseVisibility,
+            aiProvider: targetExercise.aiProvider ?? undefined,
+            aiModel: targetExercise.aiModel ?? undefined,
+            aiRoute: targetExercise.aiRoute ?? undefined,
           }),
         },
         token,
@@ -2536,6 +2598,7 @@ function DashboardScreen({
               note: `${description}；${analysis.notes}`,
               source: 'AI',
               visibility: conversationVisibility,
+              ...aiUsageFromAnalysis(analysis),
             }),
           },
           token,
@@ -2653,6 +2716,7 @@ function DashboardScreen({
             sodiumMg: normalized.sodiumMg,
             nutrients: normalized.nutrients,
             items: analysis.items,
+            ...aiUsageFromAnalysis(analysis),
           }),
         },
         token,
@@ -2887,6 +2951,8 @@ function DashboardScreen({
                 </View>
               ))}
             </View>
+
+            <Text style={styles.logDetailAiFootnote}>{formatAIUsageText(detailExercise)}</Text>
           </ScrollView>
         </View>
       </SafeAreaView>
@@ -2966,6 +3032,8 @@ function DashboardScreen({
                 </View>
               ))}
             </View>
+
+            <Text style={styles.logDetailAiFootnote}>{formatAIUsageText(detailLog)}</Text>
           </ScrollView>
         </View>
       </SafeAreaView>
@@ -3538,6 +3606,7 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
             sodiumMg: normalized.sodiumMg,
             nutrients: normalized.nutrients,
             items: analysis.items,
+            ...aiUsageFromAnalysis(analysis),
           }),
         },
         token,
@@ -6101,6 +6170,13 @@ const styles = StyleSheet.create({
     color: "#f3f8ff",
     fontSize: 13,
     fontWeight: "700",
+  },
+  logDetailAiFootnote: {
+    color: "#6f819f",
+    fontSize: 10,
+    lineHeight: 14,
+    textAlign: "center",
+    paddingTop: 2,
   },
   weightChart: {
     alignItems: "flex-end",

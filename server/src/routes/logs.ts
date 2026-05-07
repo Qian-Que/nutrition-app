@@ -24,6 +24,9 @@ type LogRow = {
   sodium_mg: number | null;
   nutrients_json: string | null;
   items_json: string | null;
+  ai_provider: string | null;
+  ai_model: string | null;
+  ai_route: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -76,6 +79,9 @@ function mapLogRow(row: LogRow) {
     sodiumMg: row.sodium_mg,
     nutrients: parseMaybeJson(row.nutrients_json),
     items: parseMaybeJson(row.items_json),
+    aiProvider: row.ai_provider,
+    aiModel: row.ai_model,
+    aiRoute: row.ai_route,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -171,8 +177,8 @@ logsRouter.post("/", requireAuth, async (req, res) => {
     `INSERT INTO food_logs (
       id, user_id, logged_at, meal_type, note, image_uri, source, visibility,
       calories, protein_gram, carbs_gram, fat_gram, fiber_gram, sugar_gram, sodium_mg,
-      nutrients_json, items_json, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      nutrients_json, items_json, ai_provider, ai_model, ai_route, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     req.user!.id,
@@ -191,6 +197,9 @@ logsRouter.post("/", requireAuth, async (req, res) => {
     data.sodiumMg ?? null,
     data.nutrients ? JSON.stringify(data.nutrients) : null,
     data.items ? JSON.stringify(data.items) : null,
+    data.aiProvider ?? null,
+    data.aiModel ?? null,
+    data.aiRoute ?? null,
     now,
     now,
   );
@@ -209,8 +218,10 @@ logsRouter.put("/:id", requireAuth, async (req, res) => {
   }
 
   const existing = db
-    .prepare("SELECT id, logged_at FROM food_logs WHERE id = ? AND user_id = ?")
-    .get(logId, req.user!.id) as { id: string; logged_at: string } | undefined;
+    .prepare("SELECT id, logged_at, ai_provider, ai_model, ai_route FROM food_logs WHERE id = ? AND user_id = ?")
+    .get(logId, req.user!.id) as
+    | { id: string; logged_at: string; ai_provider: string | null; ai_model: string | null; ai_route: string | null }
+    | undefined;
 
   if (!existing) {
     res.status(404).json({ message: "饮食记录不存在" });
@@ -225,7 +236,7 @@ logsRouter.put("/:id", requireAuth, async (req, res) => {
     `UPDATE food_logs
      SET logged_at = ?, meal_type = ?, note = ?, image_uri = ?, source = ?, visibility = ?,
          calories = ?, protein_gram = ?, carbs_gram = ?, fat_gram = ?, fiber_gram = ?, sugar_gram = ?, sodium_mg = ?,
-         nutrients_json = ?, items_json = ?, updated_at = ?
+         nutrients_json = ?, items_json = ?, ai_provider = ?, ai_model = ?, ai_route = ?, updated_at = ?
      WHERE id = ? AND user_id = ?`,
   ).run(
     loggedAt,
@@ -243,6 +254,9 @@ logsRouter.put("/:id", requireAuth, async (req, res) => {
     data.sodiumMg ?? null,
     data.nutrients ? JSON.stringify(data.nutrients) : null,
     data.items ? JSON.stringify(data.items) : null,
+    data.aiProvider ?? existing.ai_provider ?? null,
+    data.aiModel ?? existing.ai_model ?? null,
+    data.aiRoute ?? existing.ai_route ?? null,
     now,
     logId,
     req.user!.id,

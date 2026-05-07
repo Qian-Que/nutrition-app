@@ -36,11 +36,18 @@ export type NutritionAnalysis = {
   };
   confidence: number;
   notes: string;
+  ai?: AIUsage;
 };
 
 type NutritionTotals = NutritionAnalysis["totals"];
 
 type AIProvider = "openai" | "openai_compat_auto" | "openai_compat_responses" | "openai_compat_chat";
+
+export type AIUsage = {
+  provider: string;
+  model: string;
+  route: string;
+};
 
 type AIClientConfig = {
   provider: AIProvider;
@@ -298,7 +305,21 @@ function resolveImageDetail(rawInput?: string): "low" | "high" | "auto" {
 }
 
 function normalizeBaseUrl(url: string): string {
-  return url.endsWith("/") ? url.slice(0, -1) : url;
+  let normalized = String(url ?? "").trim().replace(/\/+$/, "");
+  if (/generativelanguage\.googleapis\.com/i.test(normalized)) {
+    normalized = normalized.replace(/\/v1beta\/models$/i, "/v1beta/openai");
+    if (/\/v1beta$/i.test(normalized)) {
+      normalized = `${normalized}/openai`;
+    }
+  }
+  return normalized;
+}
+
+function normalizeProviderForBaseUrl(provider: AIProvider, baseUrl: string): AIProvider {
+  if (provider === "openai_compat_auto" && /generativelanguage\.googleapis\.com\/v1beta\/openai/i.test(baseUrl)) {
+    return "openai_compat_chat";
+  }
+  return provider;
 }
 
 function buildPrimaryClientConfig(): AIClientConfig | null {
@@ -306,10 +327,12 @@ function buildPrimaryClientConfig(): AIClientConfig | null {
   if (!apiKey) {
     return null;
   }
+  const baseUrl = normalizeBaseUrl(config.aiBaseUrl);
+  const provider = normalizeProviderForBaseUrl(resolveProvider(config.aiProvider), baseUrl);
 
   return {
-    provider: resolveProvider(config.aiProvider),
-    baseUrl: normalizeBaseUrl(config.aiBaseUrl),
+    provider,
+    baseUrl,
     apiKey,
     model: config.aiModel,
     imageDetail: resolveImageDetail(config.aiImageDetail),
@@ -336,10 +359,12 @@ function buildBackupClientConfig(): AIClientConfig | null {
 
   const timeoutMs = Number(config.aiBackupTimeoutMs);
   const effectiveTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : config.aiTimeoutMs;
+  const baseUrl = normalizeBaseUrl(backupBaseUrl || config.aiBaseUrl);
+  const provider = normalizeProviderForBaseUrl(resolveProvider(config.aiBackupProvider || config.aiProvider), baseUrl);
 
   return {
-    provider: resolveProvider(config.aiBackupProvider || config.aiProvider),
-    baseUrl: normalizeBaseUrl(backupBaseUrl || config.aiBaseUrl),
+    provider,
+    baseUrl,
     apiKey,
     model: backupModel || config.aiModel,
     imageDetail: resolveImageDetail(config.aiBackupImageDetail || config.aiImageDetail),
@@ -545,6 +570,17 @@ function normalizeAnalysis(raw: any): NutritionAnalysis {
   };
 }
 
+function attachAIUsage(analysis: NutritionAnalysis, client: AIClientConfig): NutritionAnalysis {
+  return {
+    ...analysis,
+    ai: {
+      provider: client.provider,
+      model: client.model,
+      route: client.label,
+    },
+  };
+}
+
 function mockAnalysis(): NutritionAnalysis {
   return {
     items: [
@@ -582,6 +618,11 @@ function mockAnalysis(): NutritionAnalysis {
     },
     confidence: 0.35,
     notes: "未配置 AI_API_KEY（或 OPENAI_API_KEY），当前为演示估算值。",
+    ai: {
+      provider: "local",
+      model: "本地演示估算",
+      route: "本地",
+    },
   };
 }
 
@@ -885,7 +926,7 @@ async function analyzeImageWithClient(
     }
   }
 
-  return parseAnalysisFromRawText(rawText);
+  return attachAIUsage(parseAnalysisFromRawText(rawText), client);
 }
 
 async function analyzeTextWithClient(client: AIClientConfig, description: string) {
@@ -943,7 +984,7 @@ async function analyzeTextWithClient(client: AIClientConfig, description: string
     }
   }
 
-  return parseAnalysisFromRawText(rawText);
+  return attachAIUsage(parseAnalysisFromRawText(rawText), client);
 }
 
 async function withBackupFallback<T>(

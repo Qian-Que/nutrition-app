@@ -76,6 +76,9 @@ export const createLogSchema = z.object({
   fiberGram: z.number().min(0, "膳食纤维不能小于 0").optional(),
   sugarGram: z.number().min(0, "糖不能小于 0").optional(),
   sodiumMg: z.number().min(0, "钠不能小于 0").optional(),
+  aiProvider: z.string().max(80).optional(),
+  aiModel: z.string().max(120).optional(),
+  aiRoute: z.string().max(80).optional(),
   nutrients: z
     .object({
       sugarGram: z.number().min(0).optional(),
@@ -108,6 +111,9 @@ export const createExerciseLogSchema = z.object({
   note: z.string().max(300, "备注最多 300 字").optional(),
   source: z.enum(logSourceValues).default("AI"),
   visibility: z.enum(logVisibilityValues).default("PRIVATE"),
+  aiProvider: z.string().max(80).optional(),
+  aiModel: z.string().max(120).optional(),
+  aiRoute: z.string().max(80).optional(),
 });
 
 export const analyzeExerciseSchema = z.object({

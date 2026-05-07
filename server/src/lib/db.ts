@@ -54,6 +54,9 @@ CREATE TABLE IF NOT EXISTS food_logs (
   sodium_mg REAL,
   nutrients_json TEXT,
   items_json TEXT,
+  ai_provider TEXT,
+  ai_model TEXT,
+  ai_route TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -72,6 +75,9 @@ CREATE TABLE IF NOT EXISTS exercise_logs (
   note TEXT,
   source TEXT NOT NULL,
   visibility TEXT NOT NULL,
+  ai_provider TEXT,
+  ai_model TEXT,
+  ai_route TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -176,6 +182,12 @@ ensureColumn("food_logs", "sugar_gram", "sugar_gram REAL");
 ensureColumn("food_logs", "sodium_mg", "sodium_mg REAL");
 ensureColumn("food_logs", "items_json", "items_json TEXT");
 ensureColumn("food_logs", "nutrients_json", "nutrients_json TEXT");
+ensureColumn("food_logs", "ai_provider", "ai_provider TEXT");
+ensureColumn("food_logs", "ai_model", "ai_model TEXT");
+ensureColumn("food_logs", "ai_route", "ai_route TEXT");
+ensureColumn("exercise_logs", "ai_provider", "ai_provider TEXT");
+ensureColumn("exercise_logs", "ai_model", "ai_model TEXT");
+ensureColumn("exercise_logs", "ai_route", "ai_route TEXT");
 ensureColumn("users", "target_weight_kg", "target_weight_kg REAL");
 ensureColumn("users", "weekly_weight_change_kg", "weekly_weight_change_kg REAL");
 

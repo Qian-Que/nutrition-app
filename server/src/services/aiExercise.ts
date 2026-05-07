@@ -2,6 +2,12 @@ import { config } from "../config";
 
 export type ExerciseIntensity = "LOW" | "MODERATE" | "HIGH";
 
+export type AIUsage = {
+  provider: string;
+  model: string;
+  route: string;
+};
+
 export type ExerciseAnalysis = {
   exerciseType: string;
   durationMin: number;
@@ -10,6 +16,7 @@ export type ExerciseAnalysis = {
   calories: number;
   confidence: number;
   notes: string;
+  ai?: AIUsage;
 };
 
 type AIClientConfig = {
@@ -21,7 +28,14 @@ type AIClientConfig = {
 };
 
 function normalizeBaseUrl(url: string): string {
-  return url.endsWith("/") ? url.slice(0, -1) : url;
+  let normalized = String(url ?? "").trim().replace(/\/+$/, "");
+  if (/generativelanguage\.googleapis\.com/i.test(normalized)) {
+    normalized = normalized.replace(/\/v1beta\/models$/i, "/v1beta/openai");
+    if (/\/v1beta$/i.test(normalized)) {
+      normalized = `${normalized}/openai`;
+    }
+  }
+  return normalized;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -77,7 +91,7 @@ function buildBackupClientConfig(): AIClientConfig | null {
 
 function buildPrompt(description: string, weightKg: number) {
   return [
-    "你是运动营养助手。请从用户描述中识别本次运动，并估算运动强度与 MET。",
+    "你是运动营养助手。请从用户描述中识别本次运动，并估算运动强度、MET 与消耗热量。",
     "只返回 JSON，不要返回解释文字。",
     "JSON 字段：exerciseType, durationMin, intensity, met, confidence, notes。",
     "intensity 只能是 LOW、MODERATE、HIGH。",
@@ -100,7 +114,7 @@ async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: n
     return response.json();
   } catch (error) {
     if ((error as Error).name === "AbortError") {
-      throw new Error(`AI 请求超时（>${timeoutMs}ms）`);
+      throw new Error(`AI 请求超时（${timeoutMs}ms）`);
     }
     throw error;
   } finally {
@@ -154,6 +168,17 @@ function normalizeAnalysis(raw: any, weightKg: number, fallbackDescription: stri
   };
 }
 
+function attachAIUsage(analysis: ExerciseAnalysis, client: AIClientConfig): ExerciseAnalysis {
+  return {
+    ...analysis,
+    ai: {
+      provider: "openai_compat_chat",
+      model: client.model,
+      route: client.label,
+    },
+  };
+}
+
 function heuristicExercise(description: string, weightKg: number): ExerciseAnalysis {
   const text = description.toLowerCase();
   const durationMatch = description.match(/(\d+(?:\.\d+)?)\s*(分钟|min|mins|minute|minutes|小时|h|hour|hours)/i);
@@ -191,7 +216,14 @@ function heuristicExercise(description: string, weightKg: number): ExerciseAnaly
     intensity = "LOW";
   }
 
-  return normalizeAnalysis({ exerciseType, durationMin, intensity, met, confidence: 0.4 }, weightKg, description);
+  return {
+    ...normalizeAnalysis({ exerciseType, durationMin, intensity, met, confidence: 0.4 }, weightKg, description),
+    ai: {
+      provider: "local",
+      model: "本地运动估算",
+      route: "本地",
+    },
+  };
 }
 
 async function analyzeWithClient(client: AIClientConfig, description: string, weightKg: number) {
@@ -222,7 +254,7 @@ async function analyzeWithClient(client: AIClientConfig, description: string, we
     throw new Error("AI 未返回有效内容");
   }
 
-  return normalizeAnalysis(JSON.parse(extractJsonText(text)), weightKg, description);
+  return attachAIUsage(normalizeAnalysis(JSON.parse(extractJsonText(text)), weightKg, description), client);
 }
 
 export async function analyzeExerciseText(description: string, weightKg: number) {
