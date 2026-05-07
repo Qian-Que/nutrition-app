@@ -29,11 +29,9 @@ type AIClientConfig = {
 
 function normalizeBaseUrl(url: string): string {
   let normalized = String(url ?? "").trim().replace(/\/+$/, "");
-  if (/generativelanguage\.googleapis\.com/i.test(normalized)) {
-    normalized = normalized.replace(/\/v1beta\/models$/i, "/v1beta/openai");
-    if (/\/v1beta$/i.test(normalized)) {
-      normalized = `${normalized}/openai`;
-    }
+  normalized = normalized.replace(/\/v1beta\/models$/i, "/v1beta/openai");
+  if (/\/v1beta$/i.test(normalized)) {
+    normalized = `${normalized}/openai`;
   }
   return normalized;
 }

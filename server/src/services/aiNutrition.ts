@@ -306,17 +306,15 @@ function resolveImageDetail(rawInput?: string): "low" | "high" | "auto" {
 
 function normalizeBaseUrl(url: string): string {
   let normalized = String(url ?? "").trim().replace(/\/+$/, "");
-  if (/generativelanguage\.googleapis\.com/i.test(normalized)) {
-    normalized = normalized.replace(/\/v1beta\/models$/i, "/v1beta/openai");
-    if (/\/v1beta$/i.test(normalized)) {
-      normalized = `${normalized}/openai`;
-    }
+  normalized = normalized.replace(/\/v1beta\/models$/i, "/v1beta/openai");
+  if (/\/v1beta$/i.test(normalized)) {
+    normalized = `${normalized}/openai`;
   }
   return normalized;
 }
 
 function normalizeProviderForBaseUrl(provider: AIProvider, baseUrl: string): AIProvider {
-  if (provider === "openai_compat_auto" && /generativelanguage\.googleapis\.com\/v1beta\/openai/i.test(baseUrl)) {
+  if (provider === "openai_compat_auto" && /\/v1beta\/openai$/i.test(baseUrl)) {
     return "openai_compat_chat";
   }
   return provider;
