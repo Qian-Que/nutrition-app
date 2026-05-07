@@ -137,23 +137,47 @@ function buildPrompt(description: string, weightKg: number) {
 async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const safeUrl = maskSensitiveUrl(url);
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`AI 接口调用失败（${response.status}）：${text}`);
+      throw new Error(`AI API request failed (${response.status}): ${text}`);
     }
     return response.json();
   } catch (error) {
     if ((error as Error).name === "AbortError") {
-      throw new Error(`AI 请求超时（${timeoutMs}ms）`);
+      throw new Error(`AI request timeout (>${timeoutMs}ms): ${safeUrl}`);
     }
-    throw error;
+    throw new Error(`AI network request failed: ${safeUrl}; ${formatFetchFailure(error)}`);
   } finally {
     clearTimeout(timeout);
   }
 }
 
+function maskSensitiveUrl(rawUrl: string) {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.searchParams.has("key")) {
+      parsed.searchParams.set("key", "***");
+    }
+    return parsed.toString();
+  } catch {
+    return rawUrl.replace(/([?&]key=)[^&]+/i, "$1***");
+  }
+}
+
+function formatFetchFailure(error: unknown) {
+  const anyError = error as any;
+  const message = anyError?.message ? String(anyError.message) : String(error);
+  const cause = anyError?.cause;
+  if (!cause) {
+    return message;
+  }
+  const causeMessage = cause?.message ? String(cause.message) : "";
+  const causeCode = cause?.code || cause?.errno || cause?.name;
+  return [message, causeCode ? `cause=${causeCode}` : "", causeMessage].filter(Boolean).join("; ");
+}
 function extractText(response: any) {
   const content = response?.choices?.[0]?.message?.content;
   if (typeof content === "string") {

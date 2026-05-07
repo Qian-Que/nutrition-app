@@ -429,6 +429,7 @@ function buildTextPrompt(description: string) {
 async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const safeUrl = maskSensitiveUrl(url);
 
   try {
     const response = await fetch(url, {
@@ -444,12 +445,36 @@ async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: n
     return response.json();
   } catch (error) {
     if ((error as Error).name === "AbortError") {
-      throw new Error(`AI 请求超时（>${timeoutMs}ms）`);
+      throw new Error(`AI 请求超时（>${timeoutMs}ms）：${safeUrl}`);
     }
-    throw error;
+    throw new Error(`AI 网络请求失败：${safeUrl}；${formatFetchFailure(error)}`);
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function maskSensitiveUrl(rawUrl: string) {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.searchParams.has("key")) {
+      parsed.searchParams.set("key", "***");
+    }
+    return parsed.toString();
+  } catch {
+    return rawUrl.replace(/([?&]key=)[^&]+/i, "$1***");
+  }
+}
+
+function formatFetchFailure(error: unknown) {
+  const anyError = error as any;
+  const message = anyError?.message ? String(anyError.message) : String(error);
+  const cause = anyError?.cause;
+  if (!cause) {
+    return message;
+  }
+  const causeMessage = cause?.message ? String(cause.message) : "";
+  const causeCode = cause?.code || cause?.errno || cause?.name;
+  return [message, causeCode ? `cause=${causeCode}` : "", causeMessage].filter(Boolean).join("；");
 }
 
 function extractTextOutputFromResponses(response: any): string | null {
