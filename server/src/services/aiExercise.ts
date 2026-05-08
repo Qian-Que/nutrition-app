@@ -30,6 +30,12 @@ type AIClientConfig = {
   label: string;
 };
 
+const chineseOutputRules = [
+  "语言要求：所有可展示文本必须使用简体中文，包括 exerciseType 和 notes。",
+  "运动名称必须使用常见中文叫法，例如 Running 写作“跑步”，Weight training 写作“力量训练”。",
+  "不要输出英文运动名、英文解释或中英混排内容，除非是无法翻译的品牌或专有名称。",
+];
+
 function shouldUseGeminiNative(rawProvider: string, rawBaseUrl: string, model: string) {
   const provider = rawProvider.toLowerCase();
   return (
@@ -125,6 +131,7 @@ function buildPrompt(description: string, weightKg: number) {
   return [
     "你是运动营养助手。请从用户描述中识别本次运动，并估算运动强度、MET 与消耗热量。",
     "只返回 JSON，不要返回解释文字。",
+    ...chineseOutputRules,
     "JSON 字段：exerciseType, durationMin, intensity, met, confidence, notes。",
     "intensity 只能是 LOW、MODERATE、HIGH。",
     "durationMin 必须是分钟；如果用户没有明确时长，请根据描述保守估计。",

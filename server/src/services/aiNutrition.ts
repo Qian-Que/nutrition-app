@@ -59,6 +59,13 @@ type AIClientConfig = {
   label: string;
 };
 
+const chineseOutputRules = [
+  "语言要求：所有可展示文本必须使用简体中文，包括 items[].name 和 notes。",
+  "食物名称必须翻译成常见中文叫法，例如 Steamed White Rice 写作“白米饭”，Stir-fried Pork with Peppers and Wood Ear Mushrooms 写作“青椒木耳炒肉”。",
+  "只有品牌名、包装商品名、专有名称无法自然翻译时才保留原文；不要输出英文菜名、英文解释或中英混排菜名。",
+  "如果图片中包含多个食物，请分别使用中文列出每个食物，不要把整句英文描述作为 name。",
+];
+
 const outputSchema = {
   type: "object",
   additionalProperties: false,
@@ -399,6 +406,7 @@ function buildPrompt(description?: string) {
   const lines = [
     "你是营养师助手。请根据食物图片估算食物组成与营养。",
     "请仅返回 JSON，不要输出任何解释文字。",
+    ...chineseOutputRules,
     "JSON 必须包含 items/totals/confidence/notes 四个字段。",
     "items 每项包含 name/calories/proteinGram/carbsGram/fatGram，可选 estimatedWeightGram/fiberGram。",
     "totals 必须包含以下全部字段（都要给数字，无法确定时给合理估算，不要省略字段）：",
@@ -417,6 +425,7 @@ function buildTextPrompt(description: string) {
   return [
     "你是营养师助手。用户会用文字描述这顿饭，请估算食物与营养。",
     "请仅返回 JSON，不要输出任何解释文字。",
+    ...chineseOutputRules,
     "JSON 必须包含 items/totals/confidence/notes 四个字段。",
     "items 每项包含 name/calories/proteinGram/carbsGram/fatGram，可选 estimatedWeightGram/fiberGram。",
     "totals 必须包含以下全部字段（都要给数字，无法确定时给合理估算，不要省略字段）：",
