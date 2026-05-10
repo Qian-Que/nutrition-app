@@ -1,4 +1,4 @@
-﻿import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { NavigationContainer, useFocusEffect } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -2573,17 +2573,9 @@ function DashboardScreen({
     setConversationLoading(true);
     try {
       const description = currentInput.slice(0, 1200);
-      if (!hasImage && isExerciseIntent(description)) {
-        const exercisePayload = await apiRequest<{ analysis: ExerciseAnalysis }>(
-          '/api/exercises/analyze',
-          {
-            method: 'POST',
-            body: JSON.stringify({ description }),
-          },
-          token,
-          { timeoutMs: Math.min(ANALYZE_REQUEST_TIMEOUT_MS, 70000) },
-        );
-        const analysis = normalizeExerciseAnalysis(exercisePayload.analysis);
+      const persistExerciseAnalysis = async (analysisRaw: ExerciseAnalysis, notePrefix?: string) => {
+        const analysis = normalizeExerciseAnalysis(analysisRaw);
+        const noteParts = [notePrefix?.trim(), analysis.notes?.trim()].filter(Boolean);
         await apiRequest(
           '/api/exercises',
           {
@@ -2595,7 +2587,7 @@ function DashboardScreen({
               intensity: analysis.intensity,
               met: analysis.met,
               calories: analysis.calories,
-              note: `${description}；${analysis.notes}`,
+              note: noteParts.join('；'),
               source: 'AI',
               visibility: conversationVisibility,
               ...aiUsageFromAnalysis(analysis),
@@ -2606,8 +2598,54 @@ function DashboardScreen({
 
         setConversationInput('');
         clearConversationImage();
-        await load();
+        await Promise.all([load(), loadCalendar()]);
+      };
+
+      if (!hasImage && isExerciseIntent(description)) {
+        const exercisePayload = await apiRequest<{ analysis: ExerciseAnalysis }>(
+          '/api/exercises/analyze',
+          {
+            method: 'POST',
+            body: JSON.stringify({ description }),
+          },
+          token,
+          { timeoutMs: Math.min(ANALYZE_REQUEST_TIMEOUT_MS, 70000) },
+        );
+        await persistExerciseAnalysis(exercisePayload.analysis, description);
         return;
+      }
+
+      if (hasImage) {
+        try {
+          const exercisePayload = await apiRequest<{ analysis: ExerciseAnalysis }>(
+            '/api/exercises/analyze-image',
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                imageBase64: conversationImageBase64,
+                mimeType: conversationImageMimeType,
+                description: description || undefined,
+              }),
+            },
+            token,
+            { timeoutMs: Math.min(ANALYZE_REQUEST_TIMEOUT_MS, 90000) },
+          );
+          await persistExerciseAnalysis(exercisePayload.analysis, description || '运动截图');
+          return;
+        } catch (exerciseImageError) {
+          if (isUnauthorizedError(exerciseImageError)) {
+            throw exerciseImageError;
+          }
+
+          const explicitlyNotExercise =
+            exerciseImageError instanceof ApiRequestError &&
+            exerciseImageError.status === 422 &&
+            /(不是运动记录|运动信息不足|非运动记录)/.test(exerciseImageError.message);
+
+          if (isExerciseIntent(description) && !explicitlyNotExercise) {
+            throw exerciseImageError;
+          }
+        }
       }
 
       let usedTextFallback = false;
@@ -2754,7 +2792,6 @@ function DashboardScreen({
     selectedDate,
     token,
   ]);
-
   useEffect(() => {
     void load();
   }, [load]);
@@ -6204,5 +6241,3 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
 });
-
-

@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 
 export const sexValues = ["MALE", "FEMALE"] as const;
 export const activityLevelValues = ["SEDENTARY", "LIGHT", "MODERATE", "ACTIVE", "VERY_ACTIVE"] as const;
@@ -118,6 +118,12 @@ export const createExerciseLogSchema = z.object({
 
 export const analyzeExerciseSchema = z.object({
   description: z.string().min(1, "请提供运动描述").max(1000, "运动描述最多 1000 字"),
+});
+
+export const analyzeExerciseImageSchema = z.object({
+  imageBase64: z.string().min(1, "请提供运动截图"),
+  mimeType: z.string().max(80, "图片类型过长").optional(),
+  description: z.string().max(1000, "补充说明最多 1000 字").optional(),
 });
 
 export const createWeightLogSchema = z.object({

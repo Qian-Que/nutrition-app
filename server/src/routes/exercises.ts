@@ -2,8 +2,8 @@ import { Router } from "express";
 
 import { createId, db, nowIso } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
-import { analyzeExerciseText, estimateExerciseCalories } from "../services/aiExercise";
-import { analyzeExerciseSchema, createExerciseLogSchema } from "./schemas";
+import { analyzeExerciseImage, analyzeExerciseText, estimateExerciseCalories } from "../services/aiExercise";
+import { analyzeExerciseImageSchema, analyzeExerciseSchema, createExerciseLogSchema } from "./schemas";
 
 export const exercisesRouter = Router();
 
@@ -66,6 +66,10 @@ function getCurrentWeightKg(userId: string) {
   return user?.weight_kg ?? 65;
 }
 
+function isExerciseImageReject(message: string) {
+  return message.includes("不是运动记录") || message.includes("运动信息不足") || message.includes("非运动记录");
+}
+
 exercisesRouter.get("/", requireAuth, async (req, res) => {
   const date = typeof req.query.date === "string" ? req.query.date : undefined;
   if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -107,6 +111,33 @@ exercisesRouter.post("/analyze", requireAuth, async (req, res) => {
   } catch (error) {
     console.error("analyze-exercise failed:", error);
     res.status(502).json({ message: error instanceof Error ? `运动识别失败：${error.message}` : "运动识别失败" });
+  }
+});
+
+exercisesRouter.post("/analyze-image", requireAuth, async (req, res) => {
+  const parsed = analyzeExerciseImageSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ message: parsed.error.issues[0]?.message ?? "运动截图参数不合法" });
+    return;
+  }
+
+  try {
+    const weightKg = getCurrentWeightKg(req.user!.id);
+    const analysis = await analyzeExerciseImage(
+      parsed.data.imageBase64.trim(),
+      parsed.data.mimeType || "image/jpeg",
+      parsed.data.description,
+      weightKg,
+    );
+    res.json({ analysis, weightKg });
+  } catch (error) {
+    console.error("analyze-exercise-image failed:", error);
+    const message = error instanceof Error ? error.message : "运动截图识别失败";
+    if (isExerciseImageReject(message)) {
+      res.status(422).json({ message });
+      return;
+    }
+    res.status(502).json({ message: `运动截图识别失败：${message}` });
   }
 });
 
