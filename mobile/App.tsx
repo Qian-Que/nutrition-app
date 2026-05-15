@@ -981,7 +981,7 @@ function buildLoggedAtForSelectedDate(dateString: string) {
 }
 
 function isExerciseIntent(text: string) {
-  return /(运动|锻炼|跑步|慢跑|快走|散步|走路|骑行|单车|游泳|瑜伽|力量|健身|撸铁|深蹲|卧推|跳绳|爬楼|椭圆机|跑了|练了|walk|run|jog|bike|cycling|swim|yoga|workout|gym|training)/i.test(
+  return /(运动|锻炼|跑步|慢跑|快走|散步|走路|骑行|单车|游泳|瑜伽|力量|健身|撸铁|深蹲|卧推|跳绳|爬楼|椭圆机|乒乓球|羽毛球|网球|篮球|足球|排球|壁球|台球|拳击|搏击|划船|登山|徒步|爬山|滑雪|有氧|跳舞|舞蹈|普拉提|打球|跑了|练了|打了|walk|run|jog|bike|cycling|swim|yoga|workout|gym|training|hiit|pilates|badminton|tennis|basketball|football|soccer|volleyball|table tennis|ping pong)/i.test(
     text,
   );
 }

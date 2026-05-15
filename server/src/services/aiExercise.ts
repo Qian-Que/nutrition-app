@@ -136,7 +136,7 @@ function buildTextPrompt(description: string, weightKg: number) {
     "intensity 只能是 LOW、MODERATE、HIGH。",
     "durationMin 必须是分钟；如果用户没有明确时长，请根据描述保守估计。",
     "如果截图或描述中已经给出消耗热量，请优先使用该热量；否则用 MET、体重和时长估算。",
-    "MET 请用常见运动代谢当量估算：散步约 2.5-3.5，快走约 4-5，跑步约 7-12，骑行约 5-10，力量训练约 3.5-6，游泳约 6-10。",
+    "MET 请用常见运动代谢当量估算：散步约 2.5-3.5，快走约 4-5，跑步约 7-12，骑行约 5-10，力量训练约 3.5-6，游泳约 6-10，乒乓球约 4，羽毛球约 5-7，篮球约 6-8，足球约 7-10。",
     `用户当前体重：${weightKg}kg。`,
     `用户描述：${description}`,
   ].join("\n");
@@ -317,6 +317,23 @@ function heuristicExercise(description: string, weightKg: number): ExerciseAnaly
     exerciseType = "瑜伽";
     met = 2.8;
     intensity = "LOW";
+  } else if (/乒乓球|table tennis|ping pong/.test(text)) {
+    exerciseType = "乒乓球";
+    met = 4;
+  } else if (/羽毛球|badminton/.test(text)) {
+    exerciseType = "羽毛球";
+    met = 5.5;
+  } else if (/网球|tennis/.test(text)) {
+    exerciseType = "网球";
+    met = 6;
+  } else if (/篮球|basketball/.test(text)) {
+    exerciseType = "篮球";
+    met = 6.5;
+    intensity = "HIGH";
+  } else if (/足球|football|soccer/.test(text)) {
+    exerciseType = "足球";
+    met = 7;
+    intensity = "HIGH";
   }
 
   return {
