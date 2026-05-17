@@ -192,6 +192,15 @@ type ExerciseAnalysis = {
   ai?: AIUsage | null;
 };
 
+type EntryKind = "FOOD" | "EXERCISE" | "UNKNOWN";
+
+type EntryClassification = {
+  kind: EntryKind;
+  confidence: number;
+  reason: string;
+  ai?: AIUsage | null;
+};
+
 type WeightLog = {
   id: string;
   loggedAt: string;
@@ -984,6 +993,17 @@ function isExerciseIntent(text: string) {
   return /(运动|锻炼|跑步|慢跑|快走|散步|走路|骑行|单车|游泳|瑜伽|力量|健身|撸铁|深蹲|卧推|跳绳|爬楼|椭圆机|乒乓球|羽毛球|网球|篮球|足球|排球|壁球|台球|拳击|搏击|划船|登山|徒步|爬山|滑雪|有氧|跳舞|舞蹈|普拉提|打球|跑了|练了|打了|walk|run|jog|bike|cycling|swim|yoga|workout|gym|training|hiit|pilates|badminton|tennis|basketball|football|soccer|volleyball|table tennis|ping pong)/i.test(
     text,
   );
+}
+
+function normalizeEntryClassification(raw: unknown): EntryClassification {
+  const data = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const rawKind = typeof data.kind === "string" ? data.kind.toUpperCase() : "";
+  return {
+    kind: rawKind === "FOOD" || rawKind === "EXERCISE" || rawKind === "UNKNOWN" ? rawKind : "UNKNOWN",
+    confidence: clamp(safeNumber(data.confidence, 0), 0, 1),
+    reason: typeof data.reason === "string" ? data.reason : "",
+    ai: data.ai && typeof data.ai === "object" ? (data.ai as AIUsage) : null,
+  };
 }
 
 function normalizeExerciseAnalysis(raw: unknown): ExerciseAnalysis {
@@ -2570,6 +2590,7 @@ function DashboardScreen({
       return;
     }
 
+    let intendedEntryKind: EntryKind = "UNKNOWN";
     setConversationLoading(true);
     try {
       const description = currentInput.slice(0, 1200);
@@ -2601,7 +2622,32 @@ function DashboardScreen({
         await Promise.all([load(), loadCalendar()]);
       };
 
-      if (!hasImage && isExerciseIntent(description)) {
+      try {
+        const classificationPayload = await apiRequest<{ classification: EntryClassification }>(
+          "/api/classifier/analyze",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              description: description || undefined,
+              imageBase64: conversationImageBase64 ?? undefined,
+              mimeType: hasImage ? conversationImageMimeType : undefined,
+            }),
+          },
+          token,
+          { timeoutMs: Math.min(ANALYZE_REQUEST_TIMEOUT_MS, 70000) },
+        );
+        intendedEntryKind = normalizeEntryClassification(classificationPayload.classification).kind;
+      } catch (classificationError) {
+        if (isUnauthorizedError(classificationError)) {
+          throw classificationError;
+        }
+        intendedEntryKind = isExerciseIntent(description) ? "EXERCISE" : "UNKNOWN";
+      }
+
+      const shouldTreatAsExercise =
+        intendedEntryKind === "EXERCISE" || (intendedEntryKind === "UNKNOWN" && isExerciseIntent(description));
+
+      if (!hasImage && shouldTreatAsExercise) {
         const exercisePayload = await apiRequest<{ analysis: ExerciseAnalysis }>(
           '/api/exercises/analyze',
           {
@@ -2615,7 +2661,7 @@ function DashboardScreen({
         return;
       }
 
-      if (hasImage) {
+      if (hasImage && intendedEntryKind !== "FOOD") {
         try {
           const exercisePayload = await apiRequest<{ analysis: ExerciseAnalysis }>(
             '/api/exercises/analyze-image',
@@ -2642,7 +2688,7 @@ function DashboardScreen({
             exerciseImageError.status === 422 &&
             /(不是运动记录|运动信息不足|非运动记录)/.test(exerciseImageError.message);
 
-          if (isExerciseIntent(description) && !explicitlyNotExercise) {
+          if (shouldTreatAsExercise && !explicitlyNotExercise) {
             throw exerciseImageError;
           }
         }
@@ -2768,7 +2814,7 @@ function DashboardScreen({
         onAuthInvalid();
         return;
       }
-      if (isEndpointNotFound(error) && isExerciseIntent(conversationInput.trim())) {
+      if (isEndpointNotFound(error) && (intendedEntryKind === "EXERCISE" || isExerciseIntent(conversationInput.trim()))) {
         Alert.alert(
           '后端未升级',
           '当前后端还没有运动识别接口。请把最新 server 代码推送到 GitHub，并等待 Railway 重新部署完成后再试。',

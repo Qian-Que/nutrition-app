@@ -126,6 +126,16 @@ export const analyzeExerciseImageSchema = z.object({
   description: z.string().max(1000, "补充说明最多 1000 字").optional(),
 });
 
+export const classifyEntrySchema = z
+  .object({
+    description: z.string().max(1200, "文字描述最多 1200 字").optional(),
+    imageBase64: z.string().optional(),
+    mimeType: z.string().max(80, "图片类型过长").optional(),
+  })
+  .refine((data) => Boolean(data.description?.trim() || data.imageBase64?.trim()), {
+    message: "请提供文字描述或图片",
+  });
+
 export const createWeightLogSchema = z.object({
   loggedAt: z.iso.datetime().optional(),
   weightKg: z.number().min(30, "体重不能低于 30kg").max(250, "体重不能高于 250kg"),

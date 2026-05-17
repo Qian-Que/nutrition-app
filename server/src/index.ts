@@ -6,6 +6,7 @@ import morgan from "morgan";
 import { config } from "./config";
 import { errorHandler, notFoundHandler } from "./middleware/error";
 import { authRouter } from "./routes/auth";
+import { classifierRouter } from "./routes/classifier";
 import { exercisesRouter } from "./routes/exercises";
 import { feedRouter } from "./routes/feed";
 import { friendsRouter } from "./routes/friends";
@@ -29,6 +30,7 @@ app.get("/health", (_req, res) => {
 
 app.use("/api/auth", authRouter);
 app.use("/api/profile", profileRouter);
+app.use("/api/classifier", classifierRouter);
 app.use("/api/nutrition", nutritionRouter);
 app.use("/api/logs", logsRouter);
 app.use("/api/exercises", exercisesRouter);
