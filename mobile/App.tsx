@@ -215,6 +215,8 @@ type CalendarDaySummary = {
   proteinGram: number;
   carbsGram: number;
   fatGram: number;
+  exerciseCalories?: number;
+  exerciseDurationMin?: number;
 };
 
 type FriendItem = {
@@ -282,10 +284,15 @@ type GroupFeedPost = {
 };
 
 type SocialFeedItem = {
+  kind?: "food" | "exercise";
   id: string;
   userId: string;
   loggedAt: string;
-  mealType: MealType | string;
+  mealType?: MealType | string;
+  exerciseType?: string;
+  durationMin?: number;
+  intensity?: ExerciseIntensity | string;
+  met?: number;
   note?: string | null;
   items?: unknown;
   source: "MANUAL" | "AI" | string;
@@ -321,8 +328,12 @@ type FriendDetailPayload = {
     proteinSum: number;
     carbsSum: number;
     fatSum: number;
+    exerciseCount?: number;
+    exerciseCaloriesSum?: number;
+    exerciseDurationMin?: number;
   };
   recentLogs: FoodLog[];
+  recentExercises?: ExerciseLog[];
 };
 
 type MealType = "BREAKFAST" | "LUNCH" | "DINNER" | "SNACK";
@@ -601,6 +612,10 @@ function isNetworkLikeError(error: unknown) {
   );
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function estimateFromDescription(description: string, hasImage: boolean): NutritionAnalysis {
   const text = description.trim();
   const lc = text.toLowerCase();
@@ -720,6 +735,9 @@ async function apiRequest<T>(
   }
 
   const timeoutMs = options?.timeoutMs ?? API_REQUEST_TIMEOUT_MS;
+  const method = (init.method ?? "GET").toUpperCase();
+  const shouldRetry = method === "GET" || method === "HEAD";
+  const maxAttempts = shouldRetry ? 2 : 1;
   const candidateBaseUrls = [preferredBaseUrl];
   if (
     cloudDefaultBaseUrl &&
@@ -733,52 +751,63 @@ async function apiRequest<T>(
   let lastNetworkError: unknown;
   for (let index = 0; index < candidateBaseUrls.length; index += 1) {
     const currentBaseUrl = candidateBaseUrls[index]!;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, timeoutMs);
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, timeoutMs);
 
-    let response: Response;
-    try {
-      response = await fetch(`${currentBaseUrl}${path}`, {
-        ...init,
-        headers,
-        signal: controller.signal,
-      });
-    } catch (error) {
-      clearTimeout(timeout);
-      lastNetworkError = error;
-
-      const hasFallback = index < candidateBaseUrls.length - 1;
-      if (hasFallback && isNetworkLikeError(error)) {
-        continue;
-      }
-      throw new Error(normalizeErrorMessage(error));
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    const text = await response.text();
-    let payload: { message?: string } = {};
-    if (text) {
+      let response: Response;
       try {
-        payload = JSON.parse(text) as { message?: string };
-      } catch {
-        payload = { message: text };
+        response = await fetch(`${currentBaseUrl}${path}`, {
+          ...init,
+          headers,
+          signal: controller.signal,
+        });
+      } catch (error) {
+        clearTimeout(timeout);
+        lastNetworkError = error;
+
+        if (shouldRetry && attempt < maxAttempts && isNetworkLikeError(error)) {
+          await delay(500);
+          continue;
+        }
+
+        const hasFallback = index < candidateBaseUrls.length - 1;
+        if (hasFallback && isNetworkLikeError(error)) {
+          break;
+        }
+        throw new Error(normalizeErrorMessage(error));
+      } finally {
+        clearTimeout(timeout);
       }
-    }
 
-    if (!response.ok) {
-      throw new ApiRequestError(payload.message ?? `请求失败（${response.status}）`, response.status);
-    }
+      const text = await response.text();
+      let payload: { message?: string } = {};
+      if (text) {
+        try {
+          payload = JSON.parse(text) as { message?: string };
+        } catch {
+          payload = { message: text };
+        }
+      }
 
-    if (currentBaseUrl !== preferredBaseUrl) {
-      runtimeApiBaseUrl = currentBaseUrl;
-      void AsyncStorage.setItem(API_BASE_URL_STORAGE_KEY, currentBaseUrl);
-      void AsyncStorage.removeItem(LEGACY_API_BASE_URL_STORAGE_KEY);
-    }
+      if (!response.ok) {
+        if (shouldRetry && attempt < maxAttempts && response.status >= 500) {
+          await delay(500);
+          continue;
+        }
+        throw new ApiRequestError(payload.message ?? `请求失败（${response.status}）`, response.status);
+      }
 
-    return payload as T;
+      if (currentBaseUrl !== preferredBaseUrl) {
+        runtimeApiBaseUrl = currentBaseUrl;
+        void AsyncStorage.setItem(API_BASE_URL_STORAGE_KEY, currentBaseUrl);
+        void AsyncStorage.removeItem(LEGACY_API_BASE_URL_STORAGE_KEY);
+      }
+
+      return payload as T;
+    }
   }
 
   throw new Error(normalizeErrorMessage(lastNetworkError));
@@ -4395,21 +4424,38 @@ function SocialHomeScreen({
             <>
               {feedLoading ? <Text style={styles.hint}>动态加载中...</Text> : null}
               {!feedLoading && filteredFriendFeed.length === 0 ? <Text style={styles.hint}>暂无好友动态</Text> : null}
-              {filteredFriendFeed.map((item) => (
-                <View key={item.id} style={styles.logRow}>
-                  <Pressable onPress={() => openFriendFromName(item.user)}>
-                    <Text style={styles.dynamicNameLink}>{item.user.displayName}</Text>
-                  </Pressable>
-                  <Text style={styles.logSub}>
-                    {formatMealType(item.mealType)} · {Math.round(item.calories)} 千卡
-                  </Text>
-                  <Text style={styles.logSub}>吃了：{summarizeFood(item.items, item.note)}</Text>
-                  <Text style={styles.logSub}>
-                    蛋白质 {item.proteinGram} / 碳水 {item.carbsGram} / 脂肪 {item.fatGram}
-                  </Text>
-                  <Text style={styles.hint}>{new Date(item.loggedAt).toLocaleString()}</Text>
-                </View>
-              ))}
+              {filteredFriendFeed.map((item) => {
+                const isExercise = item.kind === "exercise";
+                return (
+                  <View key={`${item.kind ?? "food"}-${item.id}`} style={styles.logRow}>
+                    <Pressable onPress={() => openFriendFromName(item.user)}>
+                      <Text style={styles.dynamicNameLink}>{item.user.displayName}</Text>
+                    </Pressable>
+                    {isExercise ? (
+                      <>
+                        <Text style={styles.logSub}>
+                          运动 · {item.exerciseType ?? "运动"} · 消耗 {Math.round(Number(item.calories ?? 0))} 千卡
+                        </Text>
+                        <Text style={styles.logSub}>
+                          {formatIntensity(String(item.intensity ?? "MODERATE"))} · {Number(item.durationMin ?? 0)} 分钟
+                          {item.note ? ` · ${item.note}` : ""}
+                        </Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.logSub}>
+                          {formatMealType((item.mealType ?? "SNACK") as MealType)} · {Math.round(item.calories)} 千卡
+                        </Text>
+                        <Text style={styles.logSub}>吃了：{summarizeFood(item.items, item.note)}</Text>
+                        <Text style={styles.logSub}>
+                          蛋白质 {item.proteinGram} / 碳水 {item.carbsGram} / 脂肪 {item.fatGram}
+                        </Text>
+                      </>
+                    )}
+                    <Text style={styles.hint}>{new Date(item.loggedAt).toLocaleString()}</Text>
+                  </View>
+                );
+              })}
             </>
           )}
         </View>
@@ -4807,12 +4853,15 @@ function FriendDetailScreen({
   const [selectedMonth, setSelectedMonth] = useState(toMonthString(todayDateString()));
   const [monthStats, setMonthStats] = useState<Record<string, CalendarDaySummary>>({});
   const [dayLogs, setDayLogs] = useState<FoodLog[]>([]);
+  const [dayExercises, setDayExercises] = useState<ExerciseLog[]>([]);
   const [daySummary, setDaySummary] = useState({
     calories: 0,
     proteinGram: 0,
     carbsGram: 0,
     fatGram: 0,
     fiberGram: 0,
+    exerciseCalories: 0,
+    exerciseDurationMin: 0,
   });
   const [legacyApiHint, setLegacyApiHint] = useState<string | null>(null);
 
@@ -4873,11 +4922,29 @@ function FriendDetailScreen({
     try {
       const payload = await apiRequest<{
         logs: FoodLog[];
-        summary: { calories: number; proteinGram: number; carbsGram: number; fatGram: number; fiberGram: number };
+        exercises?: ExerciseLog[];
+        summary: {
+          calories: number;
+          proteinGram: number;
+          carbsGram: number;
+          fatGram: number;
+          fiberGram: number;
+          exerciseCalories?: number;
+          exerciseDurationMin?: number;
+        };
       }>(`/api/friends/${friend.id}/logs?date=${selectedDate}`, {}, token);
 
       setDayLogs(payload.logs);
-      setDaySummary(payload.summary);
+      setDayExercises(payload.exercises ?? []);
+      setDaySummary({
+        calories: payload.summary.calories,
+        proteinGram: payload.summary.proteinGram,
+        carbsGram: payload.summary.carbsGram,
+        fatGram: payload.summary.fatGram,
+        fiberGram: payload.summary.fiberGram,
+        exerciseCalories: payload.summary.exerciseCalories ?? 0,
+        exerciseDurationMin: payload.summary.exerciseDurationMin ?? 0,
+      });
       setLegacyApiHint(null);
     } catch (error) {
       if (isUnauthorizedError(error)) {
@@ -4886,8 +4953,17 @@ function FriendDetailScreen({
       }
       if (isEndpointNotFound(error)) {
         const fallbackLogs = (friendDetail?.recentLogs ?? []).filter((log) => toLogDate(log.loggedAt) === selectedDate);
+        const fallbackExercises = (friendDetail?.recentExercises ?? []).filter(
+          (exercise) => toLogDate(exercise.loggedAt) === selectedDate,
+        );
         setDayLogs(fallbackLogs);
-        setDaySummary(summarizeLogs(fallbackLogs));
+        setDayExercises(fallbackExercises);
+        const fallbackSummary = summarizeLogs(fallbackLogs);
+        setDaySummary({
+          ...fallbackSummary,
+          exerciseCalories: fallbackExercises.reduce((sum, item) => sum + Number(item.calories ?? 0), 0),
+          exerciseDurationMin: fallbackExercises.reduce((sum, item) => sum + Number(item.durationMin ?? 0), 0),
+        });
         setLegacyApiHint(null);
         return;
       }
@@ -4928,6 +5004,14 @@ function FriendDetailScreen({
       : null;
 
   const calendarCells = useMemo(() => buildCalendarCells(selectedMonth), [selectedMonth]);
+  const dayEntries = useMemo(
+    () =>
+      [
+        ...dayLogs.map((log) => ({ kind: "food" as const, loggedAt: log.loggedAt, data: log })),
+        ...dayExercises.map((exercise) => ({ kind: "exercise" as const, loggedAt: exercise.loggedAt, data: exercise })),
+      ].sort((a, b) => new Date(b.loggedAt).getTime() - new Date(a.loggedAt).getTime()),
+    [dayExercises, dayLogs],
+  );
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -4942,7 +5026,11 @@ function FriendDetailScreen({
           {friendDetail ? (
             <>
               <Text style={styles.metric}>
-                近 {friendDetail.stats.days} 天：{friendDetail.stats.logCount} 条，累计 {Math.round(friendDetail.stats.caloriesSum)} 千卡
+                近 {friendDetail.stats.days} 天：饮食 {friendDetail.stats.logCount} 条，运动 {friendDetail.stats.exerciseCount ?? 0} 条
+              </Text>
+              <Text style={styles.metric}>
+                累计摄入 {Math.round(friendDetail.stats.caloriesSum)} 千卡，运动消耗{" "}
+                {Math.round(friendDetail.stats.exerciseCaloriesSum ?? 0)} 千卡
               </Text>
               <Text style={styles.logSub}>
                 目标：热量 {friendDetail.friend.targetCalories ?? "-"}，蛋白质 {friendDetail.friend.targetProteinGram ?? "-"}，
@@ -5023,6 +5111,9 @@ function FriendDetailScreen({
           <Text style={styles.metric}>碳水：{daySummary.carbsGram.toFixed(1)} g</Text>
           <Text style={styles.metric}>脂肪：{daySummary.fatGram.toFixed(1)} g</Text>
           <Text style={styles.metric}>纤维：{daySummary.fiberGram.toFixed(1)} g</Text>
+          <Text style={styles.metric}>
+            运动：消耗 {Math.round(daySummary.exerciseCalories)} 千卡 / {Math.round(daySummary.exerciseDurationMin)} 分钟
+          </Text>
           {remainCalories !== null ? (
             <Text style={[styles.metric, remainCalories < 0 ? styles.dangerText : undefined]}>
               距离目标剩余：{remainCalories > 0 ? `${remainCalories} 千卡` : `超出 ${Math.abs(remainCalories)} 千卡`}
@@ -5031,19 +5122,31 @@ function FriendDetailScreen({
             <Text style={styles.hint}>好友未设置目标热量</Text>
           )}
           {dayLoading ? <Text style={styles.hint}>当日记录加载中...</Text> : null}
-          {dayLogs.length === 0 ? <Text style={styles.hint}>该日期暂无可见记录</Text> : null}
-          {dayLogs.map((log) => (
-            <View key={log.id} style={styles.logRow}>
-              <Text style={styles.logTitle}>
-                {formatMealType(log.mealType)} · {Math.round(log.calories)} 千卡
-              </Text>
-              <Text style={styles.logSub}>吃了：{summarizeFoodFromLog(log)}</Text>
-              <Text style={styles.logSub}>
-                蛋白质 {log.proteinGram} / 碳水 {log.carbsGram} / 脂肪 {log.fatGram}
-              </Text>
-              <Text style={styles.hint}>{new Date(log.loggedAt).toLocaleString()}</Text>
-            </View>
-          ))}
+          {dayEntries.length === 0 ? <Text style={styles.hint}>该日期暂无可见记录</Text> : null}
+          {dayEntries.map((entry) =>
+            entry.kind === "exercise" ? (
+              <View key={`exercise-${entry.data.id}`} style={styles.logRow}>
+                <Text style={styles.logTitle}>运动 · {entry.data.exerciseType}</Text>
+                <Text style={styles.logSub}>
+                  {formatIntensity(String(entry.data.intensity))} · {entry.data.durationMin} 分钟 · 消耗{" "}
+                  {Math.round(entry.data.calories)} 千卡
+                </Text>
+                {entry.data.note ? <Text style={styles.logSub}>{entry.data.note}</Text> : null}
+                <Text style={styles.hint}>{new Date(entry.data.loggedAt).toLocaleString()}</Text>
+              </View>
+            ) : (
+              <View key={`food-${entry.data.id}`} style={styles.logRow}>
+                <Text style={styles.logTitle}>
+                  {formatMealType(entry.data.mealType)} · {Math.round(entry.data.calories)} 千卡
+                </Text>
+                <Text style={styles.logSub}>吃了：{summarizeFoodFromLog(entry.data)}</Text>
+                <Text style={styles.logSub}>
+                  蛋白质 {entry.data.proteinGram} / 碳水 {entry.data.carbsGram} / 脂肪 {entry.data.fatGram}
+                </Text>
+                <Text style={styles.hint}>{new Date(entry.data.loggedAt).toLocaleString()}</Text>
+              </View>
+            ),
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>

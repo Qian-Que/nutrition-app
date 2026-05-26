@@ -29,6 +29,25 @@ type FriendLogRow = {
   updated_at: string;
 };
 
+type FriendExerciseRow = {
+  id: string;
+  user_id: string;
+  logged_at: string;
+  exercise_type: string;
+  duration_min: number;
+  intensity: string;
+  met: number;
+  calories: number;
+  note: string | null;
+  source: string;
+  visibility: string;
+  ai_provider: string | null;
+  ai_model: string | null;
+  ai_route: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 function mapFriendLogRow(row: FriendLogRow) {
   const parseMaybeJson = (value: string | null) => {
     if (!value) {
@@ -59,6 +78,27 @@ function mapFriendLogRow(row: FriendLogRow) {
     sodiumMg: row.sodium_mg,
     nutrients: parseMaybeJson(row.nutrients_json),
     items: parseMaybeJson(row.items_json),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapFriendExerciseRow(row: FriendExerciseRow) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    loggedAt: row.logged_at,
+    exerciseType: row.exercise_type,
+    durationMin: row.duration_min,
+    intensity: row.intensity,
+    met: row.met,
+    calories: row.calories,
+    note: row.note,
+    source: row.source,
+    visibility: row.visibility,
+    aiProvider: row.ai_provider,
+    aiModel: row.ai_model,
+    aiRoute: row.ai_route,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -163,7 +203,7 @@ friendsRouter.get("/:friendId/profile", requireAuth, async (req, res) => {
   const parsedLimit = Number(req.query.limit ?? 20);
   const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 50) : 20;
   const parsedDays = Number(req.query.days ?? 30);
-  const days = Number.isFinite(parsedDays) ? Math.min(Math.max(parsedDays, 1), 90) : 30;
+  const days = Number.isFinite(parsedDays) ? Math.min(Math.max(parsedDays, 1), 60) : 30;
 
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
@@ -190,6 +230,23 @@ friendsRouter.get("/:friendId/profile", requireAuth, async (req, res) => {
     fat_sum: number;
   };
 
+  const exerciseStatsRow = db
+    .prepare(
+      `SELECT
+         COUNT(*) AS exercise_count,
+         COALESCE(SUM(calories), 0) AS exercise_calories_sum,
+         COALESCE(SUM(duration_min), 0) AS exercise_duration_min
+       FROM exercise_logs
+       WHERE user_id = ?
+         AND visibility IN ('FRIENDS', 'PUBLIC')
+         AND logged_at >= ?`,
+    )
+    .get(friendId, startIso) as {
+    exercise_count: number;
+    exercise_calories_sum: number;
+    exercise_duration_min: number;
+  };
+
   const recentRows = db
     .prepare(
       `SELECT * FROM food_logs
@@ -200,6 +257,16 @@ friendsRouter.get("/:friendId/profile", requireAuth, async (req, res) => {
     .all(friendId, limit) as FriendLogRow[];
 
   const recentLogs = recentRows.map((row) => mapFriendLogRow(row));
+  const recentExerciseRows = db
+    .prepare(
+      `SELECT * FROM exercise_logs
+       WHERE user_id = ? AND visibility IN ('FRIENDS', 'PUBLIC')
+       ORDER BY logged_at DESC
+       LIMIT ?`,
+    )
+    .all(friendId, limit) as FriendExerciseRow[];
+
+  const recentExercises = recentExerciseRows.map((row) => mapFriendExerciseRow(row));
 
   res.json({
     friend: {
@@ -222,8 +289,12 @@ friendsRouter.get("/:friendId/profile", requireAuth, async (req, res) => {
       proteinSum: Number(statsRow.protein_sum ?? 0),
       carbsSum: Number(statsRow.carbs_sum ?? 0),
       fatSum: Number(statsRow.fat_sum ?? 0),
+      exerciseCount: Number(exerciseStatsRow.exercise_count ?? 0),
+      exerciseCaloriesSum: Number(exerciseStatsRow.exercise_calories_sum ?? 0),
+      exerciseDurationMin: Number(exerciseStatsRow.exercise_duration_min ?? 0),
     },
     recentLogs,
+    recentExercises,
   });
 });
 
@@ -242,16 +313,26 @@ friendsRouter.get("/:friendId/logs", requireAuth, async (req, res) => {
     return;
   }
 
+  const { start, end } = date ? buildDayRange(date) : { start: "", end: "" };
   const baseQuery =
     "SELECT * FROM food_logs WHERE user_id = ? AND visibility IN ('FRIENDS', 'PUBLIC')" +
     (date ? " AND logged_at >= ? AND logged_at < ?" : "") +
     " ORDER BY logged_at DESC";
 
   const rows = date
-    ? (db.prepare(baseQuery).all(friendId, buildDayRange(date).start, buildDayRange(date).end) as FriendLogRow[])
+    ? (db.prepare(baseQuery).all(friendId, start, end) as FriendLogRow[])
     : (db.prepare(baseQuery).all(friendId) as FriendLogRow[]);
 
   const logs = rows.map((row) => mapFriendLogRow(row));
+  const exerciseQuery =
+    "SELECT * FROM exercise_logs WHERE user_id = ? AND visibility IN ('FRIENDS', 'PUBLIC')" +
+    (date ? " AND logged_at >= ? AND logged_at < ?" : "") +
+    " ORDER BY logged_at DESC";
+  const exerciseRows = date
+    ? (db.prepare(exerciseQuery).all(friendId, start, end) as FriendExerciseRow[])
+    : (db.prepare(exerciseQuery).all(friendId) as FriendExerciseRow[]);
+
+  const exercises = exerciseRows.map((row) => mapFriendExerciseRow(row));
 
   const summary = logs.reduce(
     (acc, item) => {
@@ -262,10 +343,14 @@ friendsRouter.get("/:friendId/logs", requireAuth, async (req, res) => {
       acc.fiberGram += Number(item.fiberGram ?? 0);
       return acc;
     },
-    { calories: 0, proteinGram: 0, carbsGram: 0, fatGram: 0, fiberGram: 0 },
+    { calories: 0, proteinGram: 0, carbsGram: 0, fatGram: 0, fiberGram: 0, exerciseCalories: 0, exerciseDurationMin: 0 },
   );
+  for (const exercise of exercises) {
+    summary.exerciseCalories += Number(exercise.calories ?? 0);
+    summary.exerciseDurationMin += Number(exercise.durationMin ?? 0);
+  }
 
-  res.json({ logs, summary });
+  res.json({ logs, exercises, summary });
 });
 
 friendsRouter.get("/:friendId/calendar", requireAuth, async (req, res) => {
@@ -309,14 +394,74 @@ friendsRouter.get("/:friendId/calendar", requireAuth, async (req, res) => {
     fat_gram: number | null;
   }>;
 
-  const days = rows.map((row) => ({
-    date: row.date,
-    count: Number(row.count ?? 0),
-    calories: Number(row.calories ?? 0),
-    proteinGram: Number(row.protein_gram ?? 0),
-    carbsGram: Number(row.carbs_gram ?? 0),
-    fatGram: Number(row.fat_gram ?? 0),
-  }));
+  const exerciseRows = db
+    .prepare(
+      `SELECT
+        date(logged_at, '+8 hours') AS date,
+        COUNT(*) AS count,
+        SUM(calories) AS exercise_calories,
+        SUM(duration_min) AS exercise_duration_min
+      FROM exercise_logs
+      WHERE user_id = ?
+        AND visibility IN ('FRIENDS', 'PUBLIC')
+        AND logged_at >= ? AND logged_at < ?
+      GROUP BY date(logged_at, '+8 hours')
+      ORDER BY date ASC`,
+    )
+    .all(friendId, start, end) as Array<{
+    date: string;
+    count: number;
+    exercise_calories: number | null;
+    exercise_duration_min: number | null;
+  }>;
+
+  const dayMap = new Map<
+    string,
+    {
+      date: string;
+      count: number;
+      calories: number;
+      proteinGram: number;
+      carbsGram: number;
+      fatGram: number;
+      exerciseCalories: number;
+      exerciseDurationMin: number;
+    }
+  >();
+
+  for (const row of rows) {
+    dayMap.set(row.date, {
+      date: row.date,
+      count: Number(row.count ?? 0),
+      calories: Number(row.calories ?? 0),
+      proteinGram: Number(row.protein_gram ?? 0),
+      carbsGram: Number(row.carbs_gram ?? 0),
+      fatGram: Number(row.fat_gram ?? 0),
+      exerciseCalories: 0,
+      exerciseDurationMin: 0,
+    });
+  }
+
+  for (const row of exerciseRows) {
+    const current =
+      dayMap.get(row.date) ??
+      {
+        date: row.date,
+        count: 0,
+        calories: 0,
+        proteinGram: 0,
+        carbsGram: 0,
+        fatGram: 0,
+        exerciseCalories: 0,
+        exerciseDurationMin: 0,
+      };
+    current.count += Number(row.count ?? 0);
+    current.exerciseCalories = Number(row.exercise_calories ?? 0);
+    current.exerciseDurationMin = Number(row.exercise_duration_min ?? 0);
+    dayMap.set(row.date, current);
+  }
+
+  const days = Array.from(dayMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
   res.json({ month, days });
 });

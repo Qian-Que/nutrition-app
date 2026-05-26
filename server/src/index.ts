@@ -4,6 +4,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 
 import { config } from "./config";
+import { startRetentionJob } from "./lib/retention";
 import { errorHandler, notFoundHandler } from "./middleware/error";
 import { authRouter } from "./routes/auth";
 import { classifierRouter } from "./routes/classifier";
@@ -41,6 +42,8 @@ app.use("/api/feed", feedRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
+
+startRetentionJob();
 
 app.listen(config.port, () => {
   console.log(`Server running on http://localhost:${config.port}`);

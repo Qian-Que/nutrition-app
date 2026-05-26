@@ -22,7 +22,7 @@ feedRouter.get("/friends", requireAuth, async (req, res) => {
   }
 
   const placeholders = friendIds.map(() => "?").join(",");
-  const sql = `
+  const foodSql = `
     SELECT fl.*, u.display_name
     FROM food_logs fl
     JOIN users u ON u.id = fl.user_id
@@ -31,11 +31,21 @@ feedRouter.get("/friends", requireAuth, async (req, res) => {
     ORDER BY fl.logged_at DESC
     LIMIT ?
   `;
+  const exerciseSql = `
+    SELECT el.*, u.display_name
+    FROM exercise_logs el
+    JOIN users u ON u.id = el.user_id
+    WHERE el.user_id IN (${placeholders})
+      AND el.visibility IN ('FRIENDS', 'PUBLIC')
+    ORDER BY el.logged_at DESC
+    LIMIT ?
+  `;
 
-  const rows = db.prepare(sql).all(...friendIds, limit) as any[];
-
-  res.json({
-    feed: rows.map((row) => ({
+  const foodRows = db.prepare(foodSql).all(...friendIds, limit) as any[];
+  const exerciseRows = db.prepare(exerciseSql).all(...friendIds, limit) as any[];
+  const feed = [
+    ...foodRows.map((row) => ({
+      kind: "food",
       id: row.id,
       userId: row.user_id,
       loggedAt: row.logged_at,
@@ -54,6 +64,30 @@ feedRouter.get("/friends", requireAuth, async (req, res) => {
         displayName: row.display_name,
       },
     })),
+    ...exerciseRows.map((row) => ({
+      kind: "exercise",
+      id: row.id,
+      userId: row.user_id,
+      loggedAt: row.logged_at,
+      exerciseType: row.exercise_type,
+      durationMin: row.duration_min,
+      intensity: row.intensity,
+      met: row.met,
+      calories: row.calories,
+      note: row.note,
+      source: row.source,
+      visibility: row.visibility,
+      user: {
+        id: row.user_id,
+        displayName: row.display_name,
+      },
+    })),
+  ]
+    .sort((a, b) => new Date(b.loggedAt).getTime() - new Date(a.loggedAt).getTime())
+    .slice(0, limit);
+
+  res.json({
+    feed,
   });
 });
 
