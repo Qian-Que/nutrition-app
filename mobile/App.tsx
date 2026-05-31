@@ -4,7 +4,7 @@ import { NavigationContainer, useFocusEffect } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -32,8 +32,8 @@ const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS
 const ANALYZE_REQUEST_TIMEOUT_MS =
   Number.isFinite(parsedAnalyzeTimeoutMs) && parsedAnalyzeTimeoutMs > 0 ? parsedAnalyzeTimeoutMs : 140000;
 const CALORIE_RING_SEGMENT_COUNT = 28;
-const CALORIE_RING_CENTER = 58;
-const CALORIE_RING_RADIUS = 48;
+const CALORIE_RING_CENTER = 48;
+const CALORIE_RING_RADIUS = 39;
 
 type JournalThemeMode = "day" | "night";
 
@@ -122,6 +122,66 @@ const journalThemeTokens: Record<
     statusBar: "light",
   },
 };
+
+const JournalThemeContext = createContext(journalThemeTokens.night);
+
+function useJournalTheme() {
+  return useContext(JournalThemeContext);
+}
+
+function useThemedAppStyles() {
+  const theme = useJournalTheme();
+  return useMemo(
+    () => ({
+      safe: { backgroundColor: theme.background },
+      screenTitle: { color: theme.text },
+      card: { backgroundColor: theme.surface, borderColor: theme.border },
+      highlightCard: { backgroundColor: theme.accentSoft, borderColor: theme.accent },
+      detailCard: { borderColor: theme.borderStrong },
+      cardTitle: { color: theme.text },
+      metric: { color: theme.textSoft },
+      hint: { color: theme.textMuted },
+      dangerText: { color: theme.danger },
+      sectionTitle: { color: theme.textMuted },
+      input: { backgroundColor: theme.input, borderColor: theme.border, color: theme.text },
+      textareaInput: { backgroundColor: theme.input, borderColor: theme.border, color: theme.text },
+      primaryButton: { backgroundColor: theme.accent },
+      ghostButton: { backgroundColor: theme.surfaceAlt, borderColor: theme.borderStrong },
+      ghostButtonText: { color: theme.textSoft },
+      secondaryButton: { borderColor: theme.accent },
+      secondaryButtonText: { color: theme.accent },
+      optionChip: { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
+      optionChipActive: { backgroundColor: theme.accentSoft, borderColor: theme.accent },
+      optionChipText: { color: theme.textMuted },
+      optionChipTextActive: { color: theme.activeText },
+      logRow: { borderTopColor: theme.border },
+      logTitle: { color: theme.text },
+      logSub: { color: theme.textMuted },
+      dynamicCircleButton: { backgroundColor: theme.surface, borderColor: theme.border },
+      dynamicCircleButtonText: { color: theme.text },
+      dynamicFilterChip: { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
+      dynamicFilterChipActive: { backgroundColor: theme.accentSoft, borderColor: theme.accent },
+      dynamicFilterChipText: { color: theme.textMuted },
+      dynamicFilterChipTextActive: { color: theme.activeText },
+      dynamicNameLink: { color: theme.accent },
+      calendarWeekText: { color: theme.textMuted },
+      calendarCellButton: { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
+      calendarCellButtonActive: { backgroundColor: theme.accentSoft, borderColor: theme.accent },
+      calendarDayText: { color: theme.text },
+      calendarDayTextActive: { color: theme.activeText },
+      calendarCalText: { color: theme.textMuted },
+      calendarCalTextActive: { color: theme.activeText },
+      weightBar: { backgroundColor: theme.accent },
+      weightBarValue: { color: theme.text },
+      weightBarDate: { color: theme.textMuted },
+      chatArea: { backgroundColor: theme.surfaceAlt, borderColor: theme.border },
+      chatBubbleUser: { backgroundColor: theme.accentSoft },
+      chatBubbleAssistant: { backgroundColor: theme.surfaceSoft },
+      chatBubbleText: { color: theme.text },
+    }),
+    [theme],
+  );
+}
 
 function normalizeBaseUrl(value: string | null | undefined) {
   return (value ?? "").trim().replace(/\/+$/, "");
@@ -1747,14 +1807,16 @@ function NumberInput({
   onChangeText: (value: string) => void;
   placeholder: string;
 }) {
+  const theme = useJournalTheme();
+  const themed = useThemedAppStyles();
   return (
     <TextInput
-      style={styles.input}
+      style={[styles.input, themed.input]}
       value={value}
       onChangeText={onChangeText}
       keyboardType="numeric"
       placeholder={placeholder}
-      placeholderTextColor="#8992a3"
+      placeholderTextColor={theme.placeholder}
     />
   );
 }
@@ -1770,19 +1832,20 @@ function OptionRow<T extends string>({
   value: T;
   onChange: (value: T) => void;
 }) {
+  const themed = useThemedAppStyles();
   return (
     <View style={styles.sectionBlock}>
-      <Text style={styles.sectionTitle}>{label}</Text>
+      <Text style={[styles.sectionTitle, themed.sectionTitle]}>{label}</Text>
       <View style={styles.optionWrap}>
         {options.map((option) => {
           const active = value === option.value;
           return (
             <Pressable
               key={option.value}
-              style={[styles.optionChip, active && styles.optionChipActive]}
+              style={[styles.optionChip, themed.optionChip, active && styles.optionChipActive, active && themed.optionChipActive]}
               onPress={() => onChange(option.value)}
             >
-              <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>{option.label}</Text>
+              <Text style={[styles.optionChipText, themed.optionChipText, active && styles.optionChipTextActive, active && themed.optionChipTextActive]}>{option.label}</Text>
             </Pressable>
           );
         })}
@@ -2173,6 +2236,7 @@ function DashboardScreen({
   const [editExerciseIntensity, setEditExerciseIntensity] = useState<ExerciseIntensity>('MODERATE');
   const [editExerciseVisibility, setEditExerciseVisibility] = useState<Visibility>('PRIVATE');
   const [savingExerciseEdit, setSavingExerciseEdit] = useState(false);
+  const themed = useThemedAppStyles();
   const journalTheme = journalThemeTokens[journalThemeMode];
 
   const themedJournal = useMemo(
@@ -3328,7 +3392,6 @@ function DashboardScreen({
           <Text style={[styles.journalRemainText, themedJournal.softText]}>{formatSignedKcalChange(calorieChangeFromPreviousDay)}</Text>
           <Pressable style={[styles.journalThemeToggle, themedJournal.surface]} onPress={toggleJournalTheme}>
             <Text style={[styles.journalThemeToggleIcon, themedJournal.text]}>{journalThemeMode === "night" ? "☾" : "☀"}</Text>
-            <Text style={[styles.journalThemeToggleText, themedJournal.text]}>{journalThemeMode === "night" ? "夜间" : "日间"}</Text>
           </Pressable>
         </View>
 
@@ -3654,10 +3717,10 @@ function DashboardScreen({
               <OptionRow label='可见范围' options={visibilityOptions} value={editVisibility} onChange={setEditVisibility} />
 
               <View style={styles.rowGap}>
-                <Pressable style={styles.secondaryButton} onPress={closeEditModal} disabled={savingEdit}>
-                  <Text style={styles.secondaryButtonText}>取消</Text>
+                <Pressable style={[styles.secondaryButton, themed.secondaryButton]} onPress={closeEditModal} disabled={savingEdit}>
+                  <Text style={[styles.secondaryButtonText, themed.secondaryButtonText]}>取消</Text>
                 </Pressable>
-                <Pressable style={styles.primaryButton} onPress={() => void saveEditedLog()} disabled={savingEdit}>
+                <Pressable style={[styles.primaryButton, themed.primaryButton]} onPress={() => void saveEditedLog()} disabled={savingEdit}>
                   <Text style={styles.primaryButtonText}>{savingEdit ? '保存中...' : '保存修改'}</Text>
                 </Pressable>
               </View>
@@ -3740,10 +3803,10 @@ function DashboardScreen({
               <OptionRow label='可见范围' options={visibilityOptions} value={editExerciseVisibility} onChange={setEditExerciseVisibility} />
 
               <View style={styles.rowGap}>
-                <Pressable style={styles.secondaryButton} onPress={closeExerciseEditModal} disabled={savingExerciseEdit}>
-                  <Text style={styles.secondaryButtonText}>取消</Text>
+                <Pressable style={[styles.secondaryButton, themed.secondaryButton]} onPress={closeExerciseEditModal} disabled={savingExerciseEdit}>
+                  <Text style={[styles.secondaryButtonText, themed.secondaryButtonText]}>取消</Text>
                 </Pressable>
-                <Pressable style={styles.primaryButton} onPress={() => void saveEditedExercise()} disabled={savingExerciseEdit}>
+                <Pressable style={[styles.primaryButton, themed.primaryButton]} onPress={() => void saveEditedExercise()} disabled={savingExerciseEdit}>
                   <Text style={styles.primaryButtonText}>{savingExerciseEdit ? '保存中...' : '保存修改'}</Text>
                 </Pressable>
               </View>
@@ -3755,6 +3818,8 @@ function DashboardScreen({
   );
 }
 function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void }) {
+  const themed = useThemedAppStyles();
+  const theme = useJournalTheme();
   const [analysis, setAnalysis] = useState<NutritionAnalysis | null>(null);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -3927,37 +3992,37 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
   }, [analysis, imageUri, mealType, onSaved, textSourceNote, token, visibility]);
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={[styles.safe, themed.safe]}>
       <ScrollView contentContainerStyle={styles.screenContainer}>
-        <Text style={styles.screenTitle}>智能识别</Text>
-        <View style={styles.card}>
-          <Text style={styles.hint}>说明：支持图片识别和文字描述两种 AI 估算方式，识别后可直接保存为每日记录。</Text>
+        <Text style={[styles.screenTitle, themed.screenTitle]}>智能识别</Text>
+        <View style={[styles.card, themed.card]}>
+          <Text style={[styles.hint, themed.hint]}>说明：支持图片识别和文字描述两种 AI 估算方式，识别后可直接保存为每日记录。</Text>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>识别方式</Text>
+        <View style={[styles.card, themed.card]}>
+          <Text style={[styles.cardTitle, themed.cardTitle]}>识别方式</Text>
           <OptionRow label="方式" options={analyzeModeOptions} value={analyzeMode} onChange={setAnalyzeMode} />
 
           {analyzeMode === "IMAGE" ? (
             <View style={styles.rowGap}>
-              <Pressable style={styles.primaryButton} onPress={() => void handleImagePick("camera")}>
+              <Pressable style={[styles.primaryButton, themed.primaryButton]} onPress={() => void handleImagePick("camera")}>
                 <Text style={styles.primaryButtonText}>拍照识别</Text>
               </Pressable>
-              <Pressable style={styles.secondaryButton} onPress={() => void handleImagePick("library")}>
-                <Text style={styles.secondaryButtonText}>从相册选择</Text>
+              <Pressable style={[styles.secondaryButton, themed.secondaryButton]} onPress={() => void handleImagePick("library")}>
+                <Text style={[styles.secondaryButtonText, themed.secondaryButtonText]}>从相册选择</Text>
               </Pressable>
             </View>
           ) : (
             <>
               <TextInput
-                style={styles.textareaInput}
+                style={[styles.textareaInput, themed.textareaInput]}
                 value={textDescription}
                 onChangeText={setTextDescription}
                 placeholder="请输入饮食描述，例如：午餐吃了150g鸡胸肉、1碗米饭、半份西兰花"
-                placeholderTextColor="#8992a3"
+                placeholderTextColor={theme.placeholder}
                 multiline
               />
-              <Pressable style={styles.primaryButton} onPress={() => void handleTextAnalyze()}>
+              <Pressable style={[styles.primaryButton, themed.primaryButton]} onPress={() => void handleTextAnalyze()}>
                 <Text style={styles.primaryButtonText}>文字估算</Text>
               </Pressable>
             </>
@@ -3965,44 +4030,44 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
         </View>
 
         {imageUri ? (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>图片预览</Text>
+          <View style={[styles.card, themed.card]}>
+            <Text style={[styles.cardTitle, themed.cardTitle]}>图片预览</Text>
             <Image source={{ uri: imageUri }} style={styles.previewImage} />
           </View>
         ) : null}
 
-        {loading ? <ActivityIndicator size="large" color="#1e5eff" /> : null}
+        {loading ? <ActivityIndicator size="large" color={theme.accent} /> : null}
 
         {analysis ? (
-          <View style={styles.card}>
+          <View style={[styles.card, themed.card]}>
             {(() => {
               const normalized = buildPersistedNutritionFromAnalysis(analysis);
               return (
                 <>
-            <Text style={styles.cardTitle}>智能识别结果</Text>
-            <Text style={styles.metric}>热量：{safeFixed(normalized.calories, 1)} 千卡</Text>
-            <Text style={styles.metric}>蛋白质：{safeFixed(normalized.proteinGram, 1)} g</Text>
-            <Text style={styles.metric}>碳水：{safeFixed(normalized.carbsGram, 1)} g</Text>
-            <Text style={styles.metric}>脂肪：{safeFixed(normalized.fatGram, 1)} g</Text>
-            <Text style={styles.metric}>膳食纤维：{safeFixed(normalized.fiberGram, 1)} g</Text>
-            <Text style={styles.hint}>置信度：{safeFixed(safeNumber(analysis.confidence, 0) * 100, 0)}%</Text>
-            <Text style={styles.hint}>{analysis.notes}</Text>
-            {textSourceNote ? <Text style={styles.hint}>本次描述：{textSourceNote}</Text> : null}
+            <Text style={[styles.cardTitle, themed.cardTitle]}>智能识别结果</Text>
+            <Text style={[styles.metric, themed.metric]}>热量：{safeFixed(normalized.calories, 1)} 千卡</Text>
+            <Text style={[styles.metric, themed.metric]}>蛋白质：{safeFixed(normalized.proteinGram, 1)} g</Text>
+            <Text style={[styles.metric, themed.metric]}>碳水：{safeFixed(normalized.carbsGram, 1)} g</Text>
+            <Text style={[styles.metric, themed.metric]}>脂肪：{safeFixed(normalized.fatGram, 1)} g</Text>
+            <Text style={[styles.metric, themed.metric]}>膳食纤维：{safeFixed(normalized.fiberGram, 1)} g</Text>
+            <Text style={[styles.hint, themed.hint]}>置信度：{safeFixed(safeNumber(analysis.confidence, 0) * 100, 0)}%</Text>
+            <Text style={[styles.hint, themed.hint]}>{analysis.notes}</Text>
+            {textSourceNote ? <Text style={[styles.hint, themed.hint]}>本次描述：{textSourceNote}</Text> : null}
 
             <OptionRow label="餐次" options={mealOptions} value={mealType} onChange={setMealType} />
             <OptionRow label="可见范围" options={visibilityOptions} value={visibility} onChange={setVisibility} />
 
             {analysis.items.map((item, index) => (
               <View key={`${item.name}-${index}`} style={styles.itemRow}>
-                <Text style={styles.logTitle}>{item.name}</Text>
-                <Text style={styles.logSub}>
+                <Text style={[styles.logTitle, themed.logTitle]}>{item.name}</Text>
+                <Text style={[styles.logSub, themed.logSub]}>
                   {safeFixed(item.calories, 0)} 千卡 · 蛋白质 {safeFixed(item.proteinGram, 1)} / 碳水{" "}
                   {safeFixed(item.carbsGram, 1)} / 脂肪 {safeFixed(item.fatGram, 1)}
                 </Text>
               </View>
             ))}
 
-            <Pressable style={styles.primaryButton} onPress={() => void saveAnalysis()}>
+            <Pressable style={[styles.primaryButton, themed.primaryButton]} onPress={() => void saveAnalysis()}>
               <Text style={styles.primaryButtonText}>保存为饮食记录</Text>
             </Pressable>
                 </>
@@ -4016,6 +4081,7 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
 }
 
 function TargetsScreen({ token }: { token: string }) {
+  const themed = useThemedAppStyles();
   const [age, setAge] = useState("25");
   const [height, setHeight] = useState("170");
   const [weight, setWeight] = useState("65");
@@ -4132,12 +4198,12 @@ function TargetsScreen({ token }: { token: string }) {
   }, [activityLevel, age, goal, height, sex, targetWeight, token, weeklyWeightChange, weight]);
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={[styles.safe, themed.safe]}>
       <ScrollView contentContainerStyle={styles.screenContainer}>
-        <Text style={styles.screenTitle}>目标设置</Text>
+        <Text style={[styles.screenTitle, themed.screenTitle]}>目标设置</Text>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>身体信息</Text>
+        <View style={[styles.card, themed.card]}>
+          <Text style={[styles.cardTitle, themed.cardTitle]}>身体信息</Text>
           <NumberInput value={age} onChangeText={setAge} placeholder="年龄" />
           <NumberInput value={height} onChangeText={setHeight} placeholder="身高（cm）" />
           <NumberInput value={weight} onChangeText={setWeight} placeholder="体重（kg）" />
@@ -4147,34 +4213,34 @@ function TargetsScreen({ token }: { token: string }) {
           <OptionRow label="性别" options={sexOptions} value={sex} onChange={setSex} />
           <OptionRow label="活动水平" options={activityOptions} value={activityLevel} onChange={setActivityLevel} />
           <OptionRow label="目标" options={goalOptions} value={goal} onChange={setGoal} />
-          <Text style={styles.hint}>
+          <Text style={[styles.hint, themed.hint]}>
             算法采用 Mifflin-St Jeor BMR、活动系数估算 TDEE，并把减重速度限制在较稳妥范围，避免过低热量。
           </Text>
 
-          <Pressable style={styles.primaryButton} onPress={() => void submit()}>
+          <Pressable style={[styles.primaryButton, themed.primaryButton]} onPress={() => void submit()}>
             <Text style={styles.primaryButtonText}>计算并保存目标</Text>
           </Pressable>
         </View>
 
         {result ? (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>系统建议目标</Text>
-            <Text style={styles.metric}>热量：{result.generatedTargets.targetCalories} 千卡</Text>
-            <Text style={styles.metric}>蛋白质：{result.generatedTargets.targetProteinGram} g</Text>
-            <Text style={styles.metric}>碳水：{result.generatedTargets.targetCarbsGram} g</Text>
-            <Text style={styles.metric}>脂肪：{result.generatedTargets.targetFatGram} g</Text>
-            <Text style={styles.metric}>BMR：{result.generatedTargets.bmr ?? "-"} 千卡，TDEE：{result.generatedTargets.tdee ?? "-"} 千卡</Text>
-            <Text style={styles.metric}>
+          <View style={[styles.card, themed.card]}>
+            <Text style={[styles.cardTitle, themed.cardTitle]}>系统建议目标</Text>
+            <Text style={[styles.metric, themed.metric]}>热量：{result.generatedTargets.targetCalories} 千卡</Text>
+            <Text style={[styles.metric, themed.metric]}>蛋白质：{result.generatedTargets.targetProteinGram} g</Text>
+            <Text style={[styles.metric, themed.metric]}>碳水：{result.generatedTargets.targetCarbsGram} g</Text>
+            <Text style={[styles.metric, themed.metric]}>脂肪：{result.generatedTargets.targetFatGram} g</Text>
+            <Text style={[styles.metric, themed.metric]}>BMR：{result.generatedTargets.bmr ?? "-"} 千卡，TDEE：{result.generatedTargets.tdee ?? "-"} 千卡</Text>
+            <Text style={[styles.metric, themed.metric]}>
               目标体重：{result.generatedTargets.targetWeightKg ?? "-"} kg，每周变化：{result.generatedTargets.weeklyWeightChangeKg ?? "-"} kg
             </Text>
-            {result.generatedTargets.targetDate ? <Text style={styles.metric}>预计到达日期：{result.generatedTargets.targetDate}</Text> : null}
-            {result.generatedTargets.planNote ? <Text style={styles.hint}>{result.generatedTargets.planNote}</Text> : null}
+            {result.generatedTargets.targetDate ? <Text style={[styles.metric, themed.metric]}>预计到达日期：{result.generatedTargets.targetDate}</Text> : null}
+            {result.generatedTargets.planNote ? <Text style={[styles.hint, themed.hint]}>{result.generatedTargets.planNote}</Text> : null}
 
-            <Text style={[styles.cardTitle, { marginTop: 14 }]}>当前生效目标</Text>
-            <Text style={styles.metric}>热量：{result.finalTargets.targetCalories} 千卡</Text>
-            <Text style={styles.metric}>蛋白质：{result.finalTargets.targetProteinGram} g</Text>
-            <Text style={styles.metric}>碳水：{result.finalTargets.targetCarbsGram} g</Text>
-            <Text style={styles.metric}>脂肪：{result.finalTargets.targetFatGram} g</Text>
+            <Text style={[styles.cardTitle, themed.cardTitle, { marginTop: 14 }]}>当前生效目标</Text>
+            <Text style={[styles.metric, themed.metric]}>热量：{result.finalTargets.targetCalories} 千卡</Text>
+            <Text style={[styles.metric, themed.metric]}>蛋白质：{result.finalTargets.targetProteinGram} g</Text>
+            <Text style={[styles.metric, themed.metric]}>碳水：{result.finalTargets.targetCarbsGram} g</Text>
+            <Text style={[styles.metric, themed.metric]}>脂肪：{result.finalTargets.targetFatGram} g</Text>
           </View>
         ) : null}
       </ScrollView>
@@ -4183,6 +4249,8 @@ function TargetsScreen({ token }: { token: string }) {
 }
 
 function WeightTrackerScreen({ token }: { token: string }) {
+  const themed = useThemedAppStyles();
+  const theme = useJournalTheme();
   const [logs, setLogs] = useState<WeightLog[]>([]);
   const [weight, setWeight] = useState("");
   const [date, setDate] = useState(todayDateString());
@@ -4263,45 +4331,45 @@ function WeightTrackerScreen({ token }: { token: string }) {
   const change = latest && first ? Number((latest.weightKg - first.weightKg).toFixed(1)) : 0;
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={[styles.safe, themed.safe]}>
       <ScrollView contentContainerStyle={styles.screenContainer}>
-        <Text style={styles.screenTitle}>体重追踪</Text>
+        <Text style={[styles.screenTitle, themed.screenTitle]}>体重追踪</Text>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>新增体重</Text>
+        <View style={[styles.card, themed.card]}>
+          <Text style={[styles.cardTitle, themed.cardTitle]}>新增体重</Text>
           <NumberInput value={weight} onChangeText={setWeight} placeholder="体重（kg）" />
           <TextInput
-            style={styles.input}
+            style={[styles.input, themed.input]}
             value={date}
             onChangeText={setDate}
             placeholder="日期（YYYY-MM-DD）"
-            placeholderTextColor="#8992a3"
+            placeholderTextColor={theme.placeholder}
           />
           <TextInput
-            style={styles.input}
+            style={[styles.input, themed.input]}
             value={note}
             onChangeText={setNote}
             placeholder="备注（可选）"
-            placeholderTextColor="#8992a3"
+            placeholderTextColor={theme.placeholder}
           />
-          <Pressable style={styles.primaryButton} onPress={() => void saveWeight()} disabled={saving}>
+          <Pressable style={[styles.primaryButton, themed.primaryButton]} onPress={() => void saveWeight()} disabled={saving}>
             <Text style={styles.primaryButtonText}>{saving ? "保存中..." : "保存体重"}</Text>
           </Pressable>
-          <Text style={styles.hint}>保存后会用最新体重重新计算目标热量与宏量营养。</Text>
+          <Text style={[styles.hint, themed.hint]}>保存后会用最新体重重新计算目标热量与宏量营养。</Text>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>趋势</Text>
-          {loading ? <ActivityIndicator size="small" color="#1e5eff" /> : null}
+        <View style={[styles.card, themed.card]}>
+          <Text style={[styles.cardTitle, themed.cardTitle]}>趋势</Text>
+          {loading ? <ActivityIndicator size="small" color={theme.accent} /> : null}
           {latest ? (
             <>
-              <Text style={styles.metric}>最新：{latest.weightKg} kg</Text>
-              <Text style={[styles.metric, change > 0 ? styles.dangerText : undefined]}>
+              <Text style={[styles.metric, themed.metric]}>最新：{latest.weightKg} kg</Text>
+              <Text style={[styles.metric, themed.metric, change > 0 ? styles.dangerText : undefined, change > 0 ? themed.dangerText : undefined]}>
                 较最早记录：{change > 0 ? "+" : ""}{change} kg
               </Text>
             </>
           ) : (
-            <Text style={styles.hint}>暂无体重记录。</Text>
+            <Text style={[styles.hint, themed.hint]}>暂无体重记录。</Text>
           )}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.weightChart}>
             {ordered.slice(-40).map((item) => {
@@ -4309,21 +4377,21 @@ function WeightTrackerScreen({ token }: { token: string }) {
               const height = 28 + ((item.weightKg - minWeight) / span) * 90;
               return (
                 <View key={item.id} style={styles.weightBarWrap}>
-                  <Text style={styles.weightBarValue}>{item.weightKg}</Text>
-                  <View style={[styles.weightBar, { height }]} />
-                  <Text style={styles.weightBarDate}>{toLogDate(item.loggedAt).slice(5)}</Text>
+                  <Text style={[styles.weightBarValue, themed.weightBarValue]}>{item.weightKg}</Text>
+                  <View style={[styles.weightBar, themed.weightBar, { height }]} />
+                  <Text style={[styles.weightBarDate, themed.weightBarDate]}>{toLogDate(item.loggedAt).slice(5)}</Text>
                 </View>
               );
             })}
           </ScrollView>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>最近记录</Text>
+        <View style={[styles.card, themed.card]}>
+          <Text style={[styles.cardTitle, themed.cardTitle]}>最近记录</Text>
           {logs.slice(0, 12).map((item) => (
-            <View key={item.id} style={styles.logRow}>
-              <Text style={styles.logTitle}>{item.weightKg} kg</Text>
-              <Text style={styles.logSub}>
+            <View key={item.id} style={[styles.logRow, themed.logRow]}>
+              <Text style={[styles.logTitle, themed.logTitle]}>{item.weightKg} kg</Text>
+              <Text style={[styles.logSub, themed.logSub]}>
                 {toLogDate(item.loggedAt)} {formatClockTime(item.loggedAt)}{item.note ? ` · ${item.note}` : ""}
               </Text>
             </View>
@@ -4349,6 +4417,7 @@ function SocialHomeScreen({
   onOpenActions: () => void;
   onAuthInvalid: () => void;
 }) {
+  const themed = useThemedAppStyles();
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [groups, setGroups] = useState<GroupMembership[]>([]);
   const [feed, setFeed] = useState<SocialFeedItem[]>([]);
@@ -4484,28 +4553,28 @@ function SocialHomeScreen({
   }, [feedFilter, friends, selectedGroup]);
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={[styles.safe, themed.safe]}>
       <ScrollView contentContainerStyle={styles.screenContainer}>
         <View style={styles.dynamicHeaderRow}>
           <View style={styles.dynamicHeaderTextWrap}>
-            <Text style={styles.screenTitle}>动态</Text>
-            <Text style={styles.hint}>欢迎回来，{user.displayName}</Text>
+            <Text style={[styles.screenTitle, themed.screenTitle]}>动态</Text>
+            <Text style={[styles.hint, themed.hint]}>欢迎回来，{user.displayName}</Text>
           </View>
           <View style={styles.dynamicHeaderActionRow}>
-            <Pressable style={styles.dynamicCircleButton} onPress={onOpenFriendList}>
-              <Text style={styles.dynamicCircleButtonText}>{">"}</Text>
+            <Pressable style={[styles.dynamicCircleButton, themed.dynamicCircleButton]} onPress={onOpenFriendList}>
+              <Text style={[styles.dynamicCircleButtonText, themed.dynamicCircleButtonText]}>{">"}</Text>
             </Pressable>
-            <Pressable style={styles.dynamicCircleButton} onPress={onOpenActions}>
-              <Text style={styles.dynamicCircleButtonText}>+</Text>
+            <Pressable style={[styles.dynamicCircleButton, themed.dynamicCircleButton]} onPress={onOpenActions}>
+              <Text style={[styles.dynamicCircleButtonText, themed.dynamicCircleButtonText]}>+</Text>
             </Pressable>
           </View>
         </View>
 
-        <View style={styles.card}>
+        <View style={[styles.card, themed.card]}>
           <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>好友 / 群组筛选</Text>
-            <Pressable style={styles.ghostButton} onPress={() => void loadAll(true)}>
-              <Text style={styles.ghostButtonText}>刷新</Text>
+            <Text style={[styles.cardTitle, themed.cardTitle]}>好友 / 群组筛选</Text>
+            <Pressable style={[styles.ghostButton, themed.ghostButton]} onPress={() => void loadAll(true)}>
+              <Text style={[styles.ghostButtonText, themed.ghostButtonText]}>刷新</Text>
             </Pressable>
           </View>
           <ScrollView
@@ -4514,13 +4583,20 @@ function SocialHomeScreen({
             contentContainerStyle={styles.dynamicFilterRow}
           >
             <Pressable
-              style={[styles.dynamicFilterChip, feedFilter.type === "ALL" && styles.dynamicFilterChipActive]}
+              style={[
+                styles.dynamicFilterChip,
+                themed.dynamicFilterChip,
+                feedFilter.type === "ALL" && styles.dynamicFilterChipActive,
+                feedFilter.type === "ALL" && themed.dynamicFilterChipActive,
+              ]}
               onPress={() => setFeedFilter({ type: "ALL" })}
             >
               <Text
                 style={[
                   styles.dynamicFilterChipText,
+                  themed.dynamicFilterChipText,
                   feedFilter.type === "ALL" && styles.dynamicFilterChipTextActive,
+                  feedFilter.type === "ALL" && themed.dynamicFilterChipTextActive,
                 ]}
               >
                 全部
@@ -4531,18 +4607,26 @@ function SocialHomeScreen({
                 key={friend.id}
                 style={[
                   styles.dynamicFilterChip,
+                  themed.dynamicFilterChip,
                   feedFilter.type === "FRIEND" &&
                     feedFilter.friendId === friend.id &&
                     styles.dynamicFilterChipActive,
+                  feedFilter.type === "FRIEND" &&
+                    feedFilter.friendId === friend.id &&
+                    themed.dynamicFilterChipActive,
                 ]}
                 onPress={() => selectFriendFilter(friend.id)}
               >
                 <Text
                   style={[
                     styles.dynamicFilterChipText,
+                    themed.dynamicFilterChipText,
                     feedFilter.type === "FRIEND" &&
                       feedFilter.friendId === friend.id &&
                       styles.dynamicFilterChipTextActive,
+                    feedFilter.type === "FRIEND" &&
+                      feedFilter.friendId === friend.id &&
+                      themed.dynamicFilterChipTextActive,
                   ]}
                 >
                   {friend.displayName}
@@ -4554,19 +4638,27 @@ function SocialHomeScreen({
                 key={item.group.id}
                 style={[
                   styles.dynamicFilterChip,
+                  themed.dynamicFilterChip,
                   styles.dynamicFilterChipGroup,
                   feedFilter.type === "GROUP" &&
                     feedFilter.groupId === item.group.id &&
                     styles.dynamicFilterChipActive,
+                  feedFilter.type === "GROUP" &&
+                    feedFilter.groupId === item.group.id &&
+                    themed.dynamicFilterChipActive,
                 ]}
                 onPress={() => selectGroupFilter(item.group.id)}
               >
                 <Text
                   style={[
                     styles.dynamicFilterChipText,
+                    themed.dynamicFilterChipText,
                     feedFilter.type === "GROUP" &&
                       feedFilter.groupId === item.group.id &&
                       styles.dynamicFilterChipTextActive,
+                    feedFilter.type === "GROUP" &&
+                      feedFilter.groupId === item.group.id &&
+                      themed.dynamicFilterChipTextActive,
                   ]}
                 >
                   {item.group.name}
@@ -4574,79 +4666,79 @@ function SocialHomeScreen({
               </Pressable>
             ))}
           </ScrollView>
-          <Text style={styles.hint}>点击昵称可进入好友详情；点击右上角 “+” 可添加好友和管理群组。</Text>
+          <Text style={[styles.hint, themed.hint]}>点击昵称可进入好友详情；点击右上角 “+” 可添加好友和管理群组。</Text>
         </View>
 
-        <View style={[styles.card, styles.highlightCard]}>
-          <Text style={styles.cardTitle}>{currentFilterLabel}</Text>
+        <View style={[styles.card, themed.card, styles.highlightCard, themed.highlightCard]}>
+          <Text style={[styles.cardTitle, themed.cardTitle]}>{currentFilterLabel}</Text>
 
           {feedFilter.type === "GROUP" ? (
             <>
-              {groupFeedLoading ? <Text style={styles.hint}>群组动态加载中...</Text> : null}
-              {!groupFeedLoading && selectedGroupFeed.length === 0 ? <Text style={styles.hint}>暂无群组动态</Text> : null}
+              {groupFeedLoading ? <Text style={[styles.hint, themed.hint]}>群组动态加载中...</Text> : null}
+              {!groupFeedLoading && selectedGroupFeed.length === 0 ? <Text style={[styles.hint, themed.hint]}>暂无群组动态</Text> : null}
               {selectedGroupFeed.map((item) => {
                 const author = item.author ?? { id: "", displayName: "未知用户" };
                 const foodLog = item.foodLog;
                 const timestamp = item.createdAt ?? foodLog?.loggedAt;
                 return (
-                  <View key={item.id} style={styles.logRow}>
+                  <View key={item.id} style={[styles.logRow, themed.logRow]}>
                     {author.id ? (
                       <Pressable onPress={() => openFriendFromName(author)}>
-                        <Text style={styles.dynamicNameLink}>{author.displayName}</Text>
+                        <Text style={[styles.dynamicNameLink, themed.dynamicNameLink]}>{author.displayName}</Text>
                       </Pressable>
                     ) : (
-                      <Text style={styles.logTitle}>{author.displayName}</Text>
+                      <Text style={[styles.logTitle, themed.logTitle]}>{author.displayName}</Text>
                     )}
                     {foodLog ? (
                       <>
-                        <Text style={styles.logSub}>
+                        <Text style={[styles.logSub, themed.logSub]}>
                           {formatMealType(foodLog.mealType)} · {Math.round(foodLog.calories)} 千卡
                         </Text>
-                        <Text style={styles.logSub}>吃了：{summarizeFood(foodLog.items, foodLog.note)}</Text>
-                        <Text style={styles.logSub}>
+                        <Text style={[styles.logSub, themed.logSub]}>吃了：{summarizeFood(foodLog.items, foodLog.note)}</Text>
+                        <Text style={[styles.logSub, themed.logSub]}>
                           蛋白质 {foodLog.proteinGram} / 碳水 {foodLog.carbsGram} / 脂肪 {foodLog.fatGram}
                         </Text>
                       </>
                     ) : null}
-                    {item.message ? <Text style={styles.logSub}>{item.message}</Text> : null}
-                    {timestamp ? <Text style={styles.hint}>{new Date(timestamp).toLocaleString()}</Text> : null}
+                    {item.message ? <Text style={[styles.logSub, themed.logSub]}>{item.message}</Text> : null}
+                    {timestamp ? <Text style={[styles.hint, themed.hint]}>{new Date(timestamp).toLocaleString()}</Text> : null}
                   </View>
                 );
               })}
             </>
           ) : (
             <>
-              {feedLoading ? <Text style={styles.hint}>动态加载中...</Text> : null}
-              {!feedLoading && filteredFriendFeed.length === 0 ? <Text style={styles.hint}>暂无好友动态</Text> : null}
+              {feedLoading ? <Text style={[styles.hint, themed.hint]}>动态加载中...</Text> : null}
+              {!feedLoading && filteredFriendFeed.length === 0 ? <Text style={[styles.hint, themed.hint]}>暂无好友动态</Text> : null}
               {filteredFriendFeed.map((item) => {
                 const isExercise = item.kind === "exercise";
                 return (
-                  <View key={`${item.kind ?? "food"}-${item.id}`} style={styles.logRow}>
+                  <View key={`${item.kind ?? "food"}-${item.id}`} style={[styles.logRow, themed.logRow]}>
                     <Pressable onPress={() => openFriendFromName(item.user)}>
-                      <Text style={styles.dynamicNameLink}>{item.user.displayName}</Text>
+                      <Text style={[styles.dynamicNameLink, themed.dynamicNameLink]}>{item.user.displayName}</Text>
                     </Pressable>
                     {isExercise ? (
                       <>
-                        <Text style={styles.logSub}>
+                        <Text style={[styles.logSub, themed.logSub]}>
                           运动 · {item.exerciseType ?? "运动"} · 消耗 {Math.round(Number(item.calories ?? 0))} 千卡
                         </Text>
-                        <Text style={styles.logSub}>
+                        <Text style={[styles.logSub, themed.logSub]}>
                           {formatIntensity(String(item.intensity ?? "MODERATE"))} · {Number(item.durationMin ?? 0)} 分钟
                           {item.note ? ` · ${item.note}` : ""}
                         </Text>
                       </>
                     ) : (
                       <>
-                        <Text style={styles.logSub}>
+                        <Text style={[styles.logSub, themed.logSub]}>
                           {formatMealType((item.mealType ?? "SNACK") as MealType)} · {Math.round(item.calories)} 千卡
                         </Text>
-                        <Text style={styles.logSub}>吃了：{summarizeFood(item.items, item.note)}</Text>
-                        <Text style={styles.logSub}>
+                        <Text style={[styles.logSub, themed.logSub]}>吃了：{summarizeFood(item.items, item.note)}</Text>
+                        <Text style={[styles.logSub, themed.logSub]}>
                           蛋白质 {item.proteinGram} / 碳水 {item.carbsGram} / 脂肪 {item.fatGram}
                         </Text>
                       </>
                     )}
-                    <Text style={styles.hint}>{new Date(item.loggedAt).toLocaleString()}</Text>
+                    <Text style={[styles.hint, themed.hint]}>{new Date(item.loggedAt).toLocaleString()}</Text>
                   </View>
                 );
               })}
@@ -4667,6 +4759,7 @@ function FriendListScreen({
   onOpenFriend: (friend: FriendItem) => void;
   onAuthInvalid: () => void;
 }) {
+  const themed = useThemedAppStyles();
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -4693,19 +4786,19 @@ function FriendListScreen({
   );
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={[styles.safe, themed.safe]}>
       <ScrollView contentContainerStyle={styles.screenContainer}>
-        <Text style={styles.screenTitle}>好友列表</Text>
-        <Text style={styles.hint}>点击好友可查看详细数据与日历。</Text>
+        <Text style={[styles.screenTitle, themed.screenTitle]}>好友列表</Text>
+        <Text style={[styles.hint, themed.hint]}>点击好友可查看详细数据与日历。</Text>
 
-        <View style={styles.card}>
-          {loading ? <Text style={styles.hint}>加载中...</Text> : null}
-          {!loading && friends.length === 0 ? <Text style={styles.hint}>暂无好友，去动态页右上角 “+” 添加。</Text> : null}
+        <View style={[styles.card, themed.card]}>
+          {loading ? <Text style={[styles.hint, themed.hint]}>加载中...</Text> : null}
+          {!loading && friends.length === 0 ? <Text style={[styles.hint, themed.hint]}>暂无好友，去动态页右上角 “+” 添加。</Text> : null}
           {friends.map((friend) => (
-            <Pressable key={friend.id} style={styles.logRow} onPress={() => onOpenFriend(friend)}>
-              <Text style={styles.dynamicNameLink}>{friend.displayName}</Text>
-              <Text style={styles.logSub}>{friend.email}</Text>
-              <Text style={styles.hint}>点击查看好友详情</Text>
+            <Pressable key={friend.id} style={[styles.logRow, themed.logRow]} onPress={() => onOpenFriend(friend)}>
+              <Text style={[styles.dynamicNameLink, themed.dynamicNameLink]}>{friend.displayName}</Text>
+              <Text style={[styles.logSub, themed.logSub]}>{friend.email}</Text>
+              <Text style={[styles.hint, themed.hint]}>点击查看好友详情</Text>
             </Pressable>
           ))}
         </View>
@@ -4723,6 +4816,8 @@ function DynamicActionsScreen({
   onAuthInvalid: () => void;
   onLogout: () => void;
 }) {
+  const themed = useThemedAppStyles();
+  const theme = useJournalTheme();
   const [incoming, setIncoming] = useState<IncomingFriendRequest[]>([]);
   const [outgoing, setOutgoing] = useState<OutgoingFriendRequest[]>([]);
   const [groups, setGroups] = useState<GroupMembership[]>([]);
@@ -4899,131 +4994,131 @@ function DynamicActionsScreen({
   }, [loadAll, onAuthInvalid, shareGroupId, shareLogId, shareMessage, token]);
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={[styles.safe, themed.safe]}>
       <ScrollView contentContainerStyle={styles.screenContainer}>
-        <Text style={styles.screenTitle}>动态操作</Text>
-        <Text style={styles.hint}>添加好友、处理请求、创建/加入群组、分享到群组。</Text>
+        <Text style={[styles.screenTitle, themed.screenTitle]}>动态操作</Text>
+        <Text style={[styles.hint, themed.hint]}>添加好友、处理请求、创建/加入群组、分享到群组。</Text>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>添加好友</Text>
+        <View style={[styles.card, themed.card]}>
+          <Text style={[styles.cardTitle, themed.cardTitle]}>添加好友</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, themed.input]}
             value={friendEmail}
             onChangeText={setFriendEmail}
             placeholder="输入对方注册邮箱"
-            placeholderTextColor="#8992a3"
+            placeholderTextColor={theme.placeholder}
             autoCapitalize="none"
           />
-          <Pressable style={styles.primaryButton} onPress={() => void sendRequest()}>
+          <Pressable style={[styles.primaryButton, themed.primaryButton]} onPress={() => void sendRequest()}>
             <Text style={styles.primaryButtonText}>发送好友请求</Text>
           </Pressable>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>好友请求</Text>
-          {loading ? <Text style={styles.hint}>加载中...</Text> : null}
+        <View style={[styles.card, themed.card]}>
+          <Text style={[styles.cardTitle, themed.cardTitle]}>好友请求</Text>
+          {loading ? <Text style={[styles.hint, themed.hint]}>加载中...</Text> : null}
 
-          <Text style={styles.sectionTitle}>收到的请求</Text>
-          {incoming.length === 0 ? <Text style={styles.hint}>暂无</Text> : null}
+          <Text style={[styles.sectionTitle, themed.sectionTitle]}>收到的请求</Text>
+          {incoming.length === 0 ? <Text style={[styles.hint, themed.hint]}>暂无</Text> : null}
           {incoming.map((item) => (
-            <View key={item.id} style={styles.logRow}>
-              <Text style={styles.logTitle}>{item.requester.displayName}</Text>
-              <Text style={styles.logSub}>{item.requester.email}</Text>
+            <View key={item.id} style={[styles.logRow, themed.logRow]}>
+              <Text style={[styles.logTitle, themed.logTitle]}>{item.requester.displayName}</Text>
+              <Text style={[styles.logSub, themed.logSub]}>{item.requester.email}</Text>
               <View style={styles.rowGap}>
-                <Pressable style={styles.secondaryButton} onPress={() => void respondRequest(item.id, "accept")}>
-                  <Text style={styles.secondaryButtonText}>接受</Text>
+                <Pressable style={[styles.secondaryButton, themed.secondaryButton]} onPress={() => void respondRequest(item.id, "accept")}>
+                  <Text style={[styles.secondaryButtonText, themed.secondaryButtonText]}>接受</Text>
                 </Pressable>
-                <Pressable style={styles.ghostButton} onPress={() => void respondRequest(item.id, "reject")}>
-                  <Text style={styles.ghostButtonText}>拒绝</Text>
+                <Pressable style={[styles.ghostButton, themed.ghostButton]} onPress={() => void respondRequest(item.id, "reject")}>
+                  <Text style={[styles.ghostButtonText, themed.ghostButtonText]}>拒绝</Text>
                 </Pressable>
               </View>
             </View>
           ))}
 
-          <Text style={styles.sectionTitle}>已发送请求</Text>
-          {outgoing.length === 0 ? <Text style={styles.hint}>暂无</Text> : null}
+          <Text style={[styles.sectionTitle, themed.sectionTitle]}>已发送请求</Text>
+          {outgoing.length === 0 ? <Text style={[styles.hint, themed.hint]}>暂无</Text> : null}
           {outgoing.map((item) => (
-            <View key={item.id} style={styles.logRow}>
-              <Text style={styles.logTitle}>{item.receiver.displayName}</Text>
-              <Text style={styles.logSub}>{item.receiver.email}</Text>
+            <View key={item.id} style={[styles.logRow, themed.logRow]}>
+              <Text style={[styles.logTitle, themed.logTitle]}>{item.receiver.displayName}</Text>
+              <Text style={[styles.logSub, themed.logSub]}>{item.receiver.email}</Text>
             </View>
           ))}
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>群组管理</Text>
+        <View style={[styles.card, themed.card]}>
+          <Text style={[styles.cardTitle, themed.cardTitle]}>群组管理</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, themed.input]}
             value={groupName}
             onChangeText={setGroupName}
             placeholder="新群组名称"
-            placeholderTextColor="#8992a3"
+            placeholderTextColor={theme.placeholder}
           />
           <TextInput
-            style={styles.input}
+            style={[styles.input, themed.input]}
             value={groupDescription}
             onChangeText={setGroupDescription}
             placeholder="群组描述（可选）"
-            placeholderTextColor="#8992a3"
+            placeholderTextColor={theme.placeholder}
           />
-          <Pressable style={styles.primaryButton} onPress={() => void createGroup()}>
+          <Pressable style={[styles.primaryButton, themed.primaryButton]} onPress={() => void createGroup()}>
             <Text style={styles.primaryButtonText}>创建群组</Text>
           </Pressable>
 
           <TextInput
-            style={styles.input}
+            style={[styles.input, themed.input]}
             value={joinGroupId}
             onChangeText={setJoinGroupId}
             placeholder="输入群组编号并加入"
-            placeholderTextColor="#8992a3"
+            placeholderTextColor={theme.placeholder}
           />
-          <Pressable style={styles.secondaryButton} onPress={() => void joinGroup()}>
-            <Text style={styles.secondaryButtonText}>加入群组</Text>
+          <Pressable style={[styles.secondaryButton, themed.secondaryButton]} onPress={() => void joinGroup()}>
+            <Text style={[styles.secondaryButtonText, themed.secondaryButtonText]}>加入群组</Text>
           </Pressable>
 
-          <Text style={styles.sectionTitle}>我的群组（{groups.length}）</Text>
-          {groups.length === 0 ? <Text style={styles.hint}>暂无</Text> : null}
+          <Text style={[styles.sectionTitle, themed.sectionTitle]}>我的群组（{groups.length}）</Text>
+          {groups.length === 0 ? <Text style={[styles.hint, themed.hint]}>暂无</Text> : null}
           {groups.map((item) => (
-            <View key={item.id} style={styles.logRow}>
-              <Text style={styles.logTitle}>{item.group.name}</Text>
-              <Text style={styles.logSub}>群组编号：{item.group.id}</Text>
-              <Text style={styles.logSub}>
+            <View key={item.id} style={[styles.logRow, themed.logRow]}>
+              <Text style={[styles.logTitle, themed.logTitle]}>{item.group.name}</Text>
+              <Text style={[styles.logSub, themed.logSub]}>群组编号：{item.group.id}</Text>
+              <Text style={[styles.logSub, themed.logSub]}>
                 成员 {item.group._count.members} · 动态 {item.group._count.posts} · 角色 {formatRole(item.role)}
               </Text>
             </View>
           ))}
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>分享到群组</Text>
+        <View style={[styles.card, themed.card]}>
+          <Text style={[styles.cardTitle, themed.cardTitle]}>分享到群组</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, themed.input]}
             value={shareGroupId}
             onChangeText={setShareGroupId}
             placeholder="群组编号"
-            placeholderTextColor="#8992a3"
+            placeholderTextColor={theme.placeholder}
           />
           <TextInput
-            style={styles.input}
+            style={[styles.input, themed.input]}
             value={shareLogId}
             onChangeText={setShareLogId}
             placeholder="饮食记录编号"
-            placeholderTextColor="#8992a3"
+            placeholderTextColor={theme.placeholder}
           />
           <TextInput
-            style={styles.input}
+            style={[styles.input, themed.input]}
             value={shareMessage}
             onChangeText={setShareMessage}
             placeholder="附言（可选）"
-            placeholderTextColor="#8992a3"
+            placeholderTextColor={theme.placeholder}
           />
-          <Pressable style={styles.secondaryButton} onPress={() => void shareLogToGroup()}>
-            <Text style={styles.secondaryButtonText}>提交分享</Text>
+          <Pressable style={[styles.secondaryButton, themed.secondaryButton]} onPress={() => void shareLogToGroup()}>
+            <Text style={[styles.secondaryButtonText, themed.secondaryButtonText]}>提交分享</Text>
           </Pressable>
         </View>
 
         <Pressable style={[styles.ghostButton, { marginBottom: 18 }]} onPress={onLogout}>
-          <Text style={styles.ghostButtonText}>退出登录</Text>
+          <Text style={[styles.ghostButtonText, themed.ghostButtonText]}>退出登录</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
@@ -5039,6 +5134,7 @@ function FriendDetailScreen({
   friend: FriendItem;
   onAuthInvalid: () => void;
 }) {
+  const themed = useThemedAppStyles();
   const [friendDetail, setFriendDetail] = useState<FriendDetailPayload | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [calendarLoading, setCalendarLoading] = useState(false);
@@ -5208,25 +5304,25 @@ function FriendDetailScreen({
   );
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={[styles.safe, themed.safe]}>
       <ScrollView contentContainerStyle={styles.screenContainer}>
-        <Text style={styles.screenTitle}>好友详情</Text>
+        <Text style={[styles.screenTitle, themed.screenTitle]}>好友详情</Text>
 
-        <View style={[styles.card, styles.detailCard]}>
-          <Text style={styles.cardTitle}>{friend.displayName}</Text>
-          <Text style={styles.logSub}>{friend.email}</Text>
-          {detailLoading && !friendDetail ? <Text style={styles.hint}>加载中...</Text> : null}
-          {legacyApiHint ? <Text style={styles.hint}>{legacyApiHint}</Text> : null}
+        <View style={[styles.card, themed.card, styles.detailCard, themed.detailCard]}>
+          <Text style={[styles.cardTitle, themed.cardTitle]}>{friend.displayName}</Text>
+          <Text style={[styles.logSub, themed.logSub]}>{friend.email}</Text>
+          {detailLoading && !friendDetail ? <Text style={[styles.hint, themed.hint]}>加载中...</Text> : null}
+          {legacyApiHint ? <Text style={[styles.hint, themed.hint]}>{legacyApiHint}</Text> : null}
           {friendDetail ? (
             <>
-              <Text style={styles.metric}>
+              <Text style={[styles.metric, themed.metric]}>
                 近 {friendDetail.stats.days} 天：饮食 {friendDetail.stats.logCount} 条，运动 {friendDetail.stats.exerciseCount ?? 0} 条
               </Text>
-              <Text style={styles.metric}>
+              <Text style={[styles.metric, themed.metric]}>
                 累计摄入 {Math.round(friendDetail.stats.caloriesSum)} 千卡，运动消耗{" "}
                 {Math.round(friendDetail.stats.exerciseCaloriesSum ?? 0)} 千卡
               </Text>
-              <Text style={styles.logSub}>
+              <Text style={[styles.logSub, themed.logSub]}>
                 目标：热量 {friendDetail.friend.targetCalories ?? "-"}，蛋白质 {friendDetail.friend.targetProteinGram ?? "-"}，
                 碳水 {friendDetail.friend.targetCarbsGram ?? "-"}，脂肪 {friendDetail.friend.targetFatGram ?? "-"}
               </Text>
@@ -5234,32 +5330,32 @@ function FriendDetailScreen({
           ) : null}
         </View>
 
-        <View style={styles.card}>
+        <View style={[styles.card, themed.card]}>
           <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>日历查看</Text>
+            <Text style={[styles.cardTitle, themed.cardTitle]}>日历查看</Text>
             <View style={styles.rowGap}>
-              <Pressable style={styles.ghostButton} onPress={() => setSelectedMonth(shiftMonthString(selectedMonth, -1))}>
-                <Text style={styles.ghostButtonText}>上月</Text>
+              <Pressable style={[styles.ghostButton, themed.ghostButton]} onPress={() => setSelectedMonth(shiftMonthString(selectedMonth, -1))}>
+                <Text style={[styles.ghostButtonText, themed.ghostButtonText]}>上月</Text>
               </Pressable>
-              <Pressable style={styles.ghostButton} onPress={() => setSelectedMonth(shiftMonthString(selectedMonth, 1))}>
-                <Text style={styles.ghostButtonText}>下月</Text>
+              <Pressable style={[styles.ghostButton, themed.ghostButton]} onPress={() => setSelectedMonth(shiftMonthString(selectedMonth, 1))}>
+                <Text style={[styles.ghostButtonText, themed.ghostButtonText]}>下月</Text>
               </Pressable>
             </View>
           </View>
-          <Text style={styles.metric}>{selectedMonth}</Text>
-          <Text style={styles.hint}>选中日期：{selectedDate}</Text>
+          <Text style={[styles.metric, themed.metric]}>{selectedMonth}</Text>
+          <Text style={[styles.hint, themed.hint]}>选中日期：{selectedDate}</Text>
           {caloriesChange !== null ? (
-            <Text style={[styles.hint, caloriesChange > 0 ? styles.dangerText : undefined]}>
+          <Text style={[styles.hint, themed.hint, caloriesChange > 0 ? styles.dangerText : undefined, caloriesChange > 0 ? themed.dangerText : undefined]}>
               较前一天变化：{caloriesChange > 0 ? "+" : ""}
               {caloriesChange} 千卡
             </Text>
           ) : null}
-          {calendarLoading ? <Text style={styles.hint}>日历数据加载中...</Text> : null}
+          {calendarLoading ? <Text style={[styles.hint, themed.hint]}>日历数据加载中...</Text> : null}
 
           <View style={styles.calendarWeekRow}>
             {["日", "一", "二", "三", "四", "五", "六"].map((week) => (
               <View key={week} style={styles.calendarWeekCell}>
-                <Text style={styles.calendarWeekText}>{week}</Text>
+                <Text style={[styles.calendarWeekText, themed.calendarWeekText]}>{week}</Text>
               </View>
             ))}
           </View>
@@ -5272,13 +5368,15 @@ function FriendDetailScreen({
                   <Pressable
                     style={[
                       styles.calendarCellButton,
+                      themed.calendarCellButton,
                       active && styles.calendarCellButtonActive,
+                      active && themed.calendarCellButtonActive,
                       !cell.inCurrentMonth && styles.calendarCellButtonMuted,
                     ]}
                     onPress={() => setSelectedDate(cell.date)}
                   >
-                    <Text style={[styles.calendarDayText, active && styles.calendarDayTextActive]}>{cell.day}</Text>
-                    <Text style={[styles.calendarCalText, active && styles.calendarCalTextActive]}>
+                    <Text style={[styles.calendarDayText, themed.calendarDayText, active && styles.calendarDayTextActive, active && themed.calendarDayTextActive]}>{cell.day}</Text>
+                    <Text style={[styles.calendarCalText, themed.calendarCalText, active && styles.calendarCalTextActive, active && themed.calendarCalTextActive]}>
                       {daySummary ? `${Math.round(daySummary.calories)}` : "-"}
                     </Text>
                   </Pressable>
@@ -5288,56 +5386,56 @@ function FriendDetailScreen({
           </View>
         </View>
 
-        <View style={styles.card}>
+        <View style={[styles.card, themed.card]}>
           <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>{selectedDate} 摄入</Text>
+            <Text style={[styles.cardTitle, themed.cardTitle]}>{selectedDate} 摄入</Text>
             <View style={styles.rowGap}>
-              <Pressable style={styles.ghostButton} onPress={() => setSelectedDate(shiftDateString(selectedDate, -1))}>
-                <Text style={styles.ghostButtonText}>前一天</Text>
+              <Pressable style={[styles.ghostButton, themed.ghostButton]} onPress={() => setSelectedDate(shiftDateString(selectedDate, -1))}>
+                <Text style={[styles.ghostButtonText, themed.ghostButtonText]}>前一天</Text>
               </Pressable>
-              <Pressable style={styles.ghostButton} onPress={() => setSelectedDate(shiftDateString(selectedDate, 1))}>
-                <Text style={styles.ghostButtonText}>后一天</Text>
+              <Pressable style={[styles.ghostButton, themed.ghostButton]} onPress={() => setSelectedDate(shiftDateString(selectedDate, 1))}>
+                <Text style={[styles.ghostButtonText, themed.ghostButtonText]}>后一天</Text>
               </Pressable>
             </View>
           </View>
-          <Text style={styles.metric}>热量：{Math.round(daySummary.calories)} 千卡</Text>
-          <Text style={styles.metric}>蛋白质：{daySummary.proteinGram.toFixed(1)} g</Text>
-          <Text style={styles.metric}>碳水：{daySummary.carbsGram.toFixed(1)} g</Text>
-          <Text style={styles.metric}>脂肪：{daySummary.fatGram.toFixed(1)} g</Text>
-          <Text style={styles.metric}>纤维：{daySummary.fiberGram.toFixed(1)} g</Text>
-          <Text style={styles.metric}>
+          <Text style={[styles.metric, themed.metric]}>热量：{Math.round(daySummary.calories)} 千卡</Text>
+          <Text style={[styles.metric, themed.metric]}>蛋白质：{daySummary.proteinGram.toFixed(1)} g</Text>
+          <Text style={[styles.metric, themed.metric]}>碳水：{daySummary.carbsGram.toFixed(1)} g</Text>
+          <Text style={[styles.metric, themed.metric]}>脂肪：{daySummary.fatGram.toFixed(1)} g</Text>
+          <Text style={[styles.metric, themed.metric]}>纤维：{daySummary.fiberGram.toFixed(1)} g</Text>
+          <Text style={[styles.metric, themed.metric]}>
             运动：消耗 {Math.round(daySummary.exerciseCalories)} 千卡 / {Math.round(daySummary.exerciseDurationMin)} 分钟
           </Text>
           {remainCalories !== null ? (
-            <Text style={[styles.metric, remainCalories < 0 ? styles.dangerText : undefined]}>
+            <Text style={[styles.metric, themed.metric, remainCalories < 0 ? styles.dangerText : undefined, remainCalories < 0 ? themed.dangerText : undefined]}>
               距离目标剩余：{remainCalories > 0 ? `${remainCalories} 千卡` : `超出 ${Math.abs(remainCalories)} 千卡`}
             </Text>
           ) : (
-            <Text style={styles.hint}>好友未设置目标热量</Text>
+            <Text style={[styles.hint, themed.hint]}>好友未设置目标热量</Text>
           )}
-          {dayLoading ? <Text style={styles.hint}>当日记录加载中...</Text> : null}
-          {dayEntries.length === 0 ? <Text style={styles.hint}>该日期暂无可见记录</Text> : null}
+          {dayLoading ? <Text style={[styles.hint, themed.hint]}>当日记录加载中...</Text> : null}
+          {dayEntries.length === 0 ? <Text style={[styles.hint, themed.hint]}>该日期暂无可见记录</Text> : null}
           {dayEntries.map((entry) =>
             entry.kind === "exercise" ? (
-              <View key={`exercise-${entry.data.id}`} style={styles.logRow}>
-                <Text style={styles.logTitle}>运动 · {entry.data.exerciseType}</Text>
-                <Text style={styles.logSub}>
+              <View key={`exercise-${entry.data.id}`} style={[styles.logRow, themed.logRow]}>
+                <Text style={[styles.logTitle, themed.logTitle]}>运动 · {entry.data.exerciseType}</Text>
+                <Text style={[styles.logSub, themed.logSub]}>
                   {formatIntensity(String(entry.data.intensity))} · {entry.data.durationMin} 分钟 · 消耗{" "}
                   {Math.round(entry.data.calories)} 千卡
                 </Text>
-                {entry.data.note ? <Text style={styles.logSub}>{entry.data.note}</Text> : null}
-                <Text style={styles.hint}>{new Date(entry.data.loggedAt).toLocaleString()}</Text>
+                {entry.data.note ? <Text style={[styles.logSub, themed.logSub]}>{entry.data.note}</Text> : null}
+                <Text style={[styles.hint, themed.hint]}>{new Date(entry.data.loggedAt).toLocaleString()}</Text>
               </View>
             ) : (
-              <View key={`food-${entry.data.id}`} style={styles.logRow}>
-                <Text style={styles.logTitle}>
+              <View key={`food-${entry.data.id}`} style={[styles.logRow, themed.logRow]}>
+                <Text style={[styles.logTitle, themed.logTitle]}>
                   {formatMealType(entry.data.mealType)} · {Math.round(entry.data.calories)} 千卡
                 </Text>
-                <Text style={styles.logSub}>吃了：{summarizeFoodFromLog(entry.data)}</Text>
-                <Text style={styles.logSub}>
+                <Text style={[styles.logSub, themed.logSub]}>吃了：{summarizeFoodFromLog(entry.data)}</Text>
+                <Text style={[styles.logSub, themed.logSub]}>
                   蛋白质 {entry.data.proteinGram} / 碳水 {entry.data.carbsGram} / 脂肪 {entry.data.fatGram}
                 </Text>
-                <Text style={styles.hint}>{new Date(entry.data.loggedAt).toLocaleString()}</Text>
+                <Text style={[styles.hint, themed.hint]}>{new Date(entry.data.loggedAt).toLocaleString()}</Text>
               </View>
             ),
           )}
@@ -5348,12 +5446,13 @@ function FriendDetailScreen({
 }
 
 function SocialNavigator({ token, user, onLogout }: { token: string; user: AuthUser; onLogout: () => void }) {
+  const theme = useJournalTheme();
   return (
     <SocialStack.Navigator
       screenOptions={{
-        headerStyle: { backgroundColor: "#0f1724" },
-        headerTintColor: "#e9effd",
-        contentStyle: { backgroundColor: "#081223" },
+        headerStyle: { backgroundColor: theme.tabBar },
+        headerTintColor: theme.text,
+        contentStyle: { backgroundColor: theme.background },
       }}
     >
       <SocialStack.Screen name="SocialHome" options={{ headerShown: false }}>
@@ -5427,39 +5526,41 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
   }, [journalThemeLoaded, journalThemeMode]);
 
   return (
-    <NavigationContainer>
-      <Tab.Navigator
-        screenOptions={{
-          headerShown: false,
-          tabBarStyle: {
-            height: 62,
-            backgroundColor: journalTheme.tabBar,
-            borderTopColor: journalTheme.tabBorder,
-          },
-          tabBarActiveTintColor: journalTheme.accent,
-          tabBarInactiveTintColor: journalTheme.textMuted,
-          tabBarLabelStyle: {
-            fontSize: 12,
-            marginBottom: 6,
-          },
-        }}
-      >
-        <Tab.Screen name="记录">
-          {() => (
-            <DashboardScreen
-              token={auth.token}
-              onAuthInvalid={onLogout}
-              journalThemeMode={journalThemeMode}
-              onJournalThemeModeChange={setJournalThemeMode}
-            />
-          )}
-        </Tab.Screen>
-        <Tab.Screen name="目标">{() => <TargetsScreen token={auth.token} />}</Tab.Screen>
-        <Tab.Screen name="体重">{() => <WeightTrackerScreen token={auth.token} />}</Tab.Screen>
-        <Tab.Screen name="动态">{() => <SocialNavigator token={auth.token} user={auth.user} onLogout={onLogout} />}</Tab.Screen>
-      </Tab.Navigator>
-      <StatusBar style={journalTheme.statusBar} />
-    </NavigationContainer>
+    <JournalThemeContext.Provider value={journalTheme}>
+      <NavigationContainer>
+        <Tab.Navigator
+          screenOptions={{
+            headerShown: false,
+            tabBarStyle: {
+              height: 62,
+              backgroundColor: journalTheme.tabBar,
+              borderTopColor: journalTheme.tabBorder,
+            },
+            tabBarActiveTintColor: journalTheme.accent,
+            tabBarInactiveTintColor: journalTheme.textMuted,
+            tabBarLabelStyle: {
+              fontSize: 12,
+              marginBottom: 6,
+            },
+          }}
+        >
+          <Tab.Screen name="记录">
+            {() => (
+              <DashboardScreen
+                token={auth.token}
+                onAuthInvalid={onLogout}
+                journalThemeMode={journalThemeMode}
+                onJournalThemeModeChange={setJournalThemeMode}
+              />
+            )}
+          </Tab.Screen>
+          <Tab.Screen name="目标">{() => <TargetsScreen token={auth.token} />}</Tab.Screen>
+          <Tab.Screen name="体重">{() => <WeightTrackerScreen token={auth.token} />}</Tab.Screen>
+          <Tab.Screen name="动态">{() => <SocialNavigator token={auth.token} user={auth.user} onLogout={onLogout} />}</Tab.Screen>
+        </Tab.Navigator>
+        <StatusBar style={journalTheme.statusBar} />
+      </NavigationContainer>
+    </JournalThemeContext.Provider>
   );
 }
 
@@ -5990,18 +6091,16 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   journalThemeToggle: {
-    minWidth: 68,
-    minHeight: 36,
+    width: 34,
+    height: 34,
     borderRadius: 999,
     borderWidth: 1,
-    paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 5,
   },
   journalThemeToggleIcon: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: "800",
   },
   journalThemeToggleText: {
@@ -6137,8 +6236,8 @@ const styles = StyleSheet.create({
   journalChartCard: {
     borderWidth: 1,
     borderRadius: 16,
-    padding: 12,
-    gap: 10,
+    padding: 10,
+    gap: 8,
   },
   journalChartContent: {
     flexDirection: "row",
@@ -6146,15 +6245,15 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   journalCalorieChart: {
-    width: 116,
-    height: 116,
+    width: 96,
+    height: 96,
     alignItems: "center",
     justifyContent: "center",
   },
   journalCalorieRing: {
-    width: 116,
-    height: 116,
-    borderRadius: 58,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
   },
   journalCalorieSegment: {
     position: "absolute",
@@ -6164,28 +6263,28 @@ const styles = StyleSheet.create({
   },
   journalCalorieCenter: {
     position: "absolute",
-    left: 20,
-    top: 20,
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+    left: 17,
+    top: 17,
+    width: 62,
+    height: 62,
+    borderRadius: 31,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 4,
   },
   journalCalorieValue: {
-    fontSize: 24,
+    fontSize: 21,
     fontWeight: "900",
-    lineHeight: 28,
+    lineHeight: 24,
   },
   journalCalorieLabel: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "700",
     marginTop: 2,
   },
   journalMacroChart: {
     flex: 1,
-    gap: 8,
+    gap: 6,
   },
   journalMacroChartRow: {
     gap: 4,
@@ -6205,7 +6304,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   journalMacroTrack: {
-    height: 10,
+    height: 8,
     borderRadius: 999,
     overflow: "hidden",
   },
