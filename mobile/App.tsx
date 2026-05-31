@@ -23,6 +23,7 @@ const AUTH_STORAGE_KEY = "nutrition_app_auth_v1";
 const API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v2";
 const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
+const JOURNAL_THEME_STORAGE_KEY = "nutrition_app_journal_theme_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
 const APP_BUILD_LABEL = "2026-05-07-r14";
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
@@ -30,6 +31,97 @@ const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeout
 const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS ?? 140000);
 const ANALYZE_REQUEST_TIMEOUT_MS =
   Number.isFinite(parsedAnalyzeTimeoutMs) && parsedAnalyzeTimeoutMs > 0 ? parsedAnalyzeTimeoutMs : 140000;
+const CALORIE_RING_SEGMENT_COUNT = 28;
+const CALORIE_RING_CENTER = 58;
+const CALORIE_RING_RADIUS = 48;
+
+type JournalThemeMode = "day" | "night";
+
+const journalThemeTokens: Record<
+  JournalThemeMode,
+  {
+    background: string;
+    surface: string;
+    surfaceAlt: string;
+    surfaceSoft: string;
+    border: string;
+    borderStrong: string;
+    input: string;
+    text: string;
+    textMuted: string;
+    textSoft: string;
+    activeText: string;
+    accent: string;
+    accentSoft: string;
+    chartTrack: string;
+    calorie: string;
+    carbs: string;
+    protein: string;
+    fat: string;
+    fiber: string;
+    exercise: string;
+    danger: string;
+    placeholder: string;
+    tabBar: string;
+    tabBorder: string;
+    statusBar: "light" | "dark";
+  }
+> = {
+  day: {
+    background: "#f4f1ec",
+    surface: "#fffdf8",
+    surfaceAlt: "#f8f3eb",
+    surfaceSoft: "#efe6da",
+    border: "#e5dacb",
+    borderStrong: "#d8c6b4",
+    input: "#fffaf3",
+    text: "#27231f",
+    textMuted: "#7a6f66",
+    textSoft: "#5f544c",
+    activeText: "#ffffff",
+    accent: "#8a6f62",
+    accentSoft: "#e8d8ce",
+    chartTrack: "#eee5dc",
+    calorie: "#9b7d71",
+    carbs: "#ed6b75",
+    protein: "#59b5df",
+    fat: "#f0cf3b",
+    fiber: "#56b880",
+    exercise: "#6aa6ff",
+    danger: "#d75b5b",
+    placeholder: "#9b9188",
+    tabBar: "#fffaf3",
+    tabBorder: "#e1d6c7",
+    statusBar: "dark",
+  },
+  night: {
+    background: "#081223",
+    surface: "#101c31",
+    surfaceAlt: "#0d182a",
+    surfaceSoft: "#132843",
+    border: "#243146",
+    borderStrong: "#36507b",
+    input: "#111b2d",
+    text: "#f4f9ff",
+    textMuted: "#93a9cc",
+    textSoft: "#c8d7f3",
+    activeText: "#f7fbff",
+    accent: "#4f88ff",
+    accentSoft: "#1b2c4e",
+    chartTrack: "#273245",
+    calorie: "#a89186",
+    carbs: "#f06d76",
+    protein: "#62c3ed",
+    fat: "#f3d845",
+    fiber: "#65c68b",
+    exercise: "#8ab6ff",
+    danger: "#ff8080",
+    placeholder: "#8f9bb0",
+    tabBar: "#0f1724",
+    tabBorder: "#273245",
+    statusBar: "light",
+  },
+};
 
 function normalizeBaseUrl(value: string | null | undefined) {
   return (value ?? "").trim().replace(/\/+$/, "");
@@ -420,6 +512,13 @@ function formatVisibility(value: Visibility | string) {
 
 function parseVisibility(value: string | null | undefined): Visibility | null {
   if (value === "PRIVATE" || value === "FRIENDS" || value === "PUBLIC") {
+    return value;
+  }
+  return null;
+}
+
+function parseJournalThemeMode(value: string | null | undefined): JournalThemeMode | null {
+  if (value === "day" || value === "night") {
     return value;
   }
   return null;
@@ -2016,9 +2115,13 @@ function AuthScreen({
 function DashboardScreen({
   token,
   onAuthInvalid,
+  journalThemeMode,
+  onJournalThemeModeChange,
 }: {
   token: string;
   onAuthInvalid: () => void;
+  journalThemeMode: JournalThemeMode;
+  onJournalThemeModeChange: (mode: JournalThemeMode) => void;
 }) {
   const [logs, setLogs] = useState<FoodLog[]>([]);
   const [summary, setSummary] = useState({ calories: 0, proteinGram: 0, carbsGram: 0, fatGram: 0, fiberGram: 0 });
@@ -2070,6 +2173,29 @@ function DashboardScreen({
   const [editExerciseIntensity, setEditExerciseIntensity] = useState<ExerciseIntensity>('MODERATE');
   const [editExerciseVisibility, setEditExerciseVisibility] = useState<Visibility>('PRIVATE');
   const [savingExerciseEdit, setSavingExerciseEdit] = useState(false);
+  const journalTheme = journalThemeTokens[journalThemeMode];
+
+  const themedJournal = useMemo(
+    () => ({
+      screen: { backgroundColor: journalTheme.background },
+      surface: { backgroundColor: journalTheme.surface, borderColor: journalTheme.border },
+      surfaceAlt: { backgroundColor: journalTheme.surfaceAlt, borderColor: journalTheme.border },
+      surfaceSoft: { backgroundColor: journalTheme.surfaceSoft },
+      input: { backgroundColor: journalTheme.input, borderColor: journalTheme.border, color: journalTheme.text },
+      text: { color: journalTheme.text },
+      mutedText: { color: journalTheme.textMuted },
+      softText: { color: journalTheme.textSoft },
+      activeChip: { backgroundColor: journalTheme.accentSoft, borderColor: journalTheme.accent },
+      activeText: { color: journalTheme.activeText },
+      metricPill: { backgroundColor: journalTheme.surfaceSoft, color: journalTheme.text },
+      actionButton: { backgroundColor: journalTheme.surfaceAlt, borderColor: journalTheme.borderStrong },
+    }),
+    [journalTheme],
+  );
+
+  const toggleJournalTheme = useCallback(() => {
+    onJournalThemeModeChange(journalThemeMode === "night" ? "day" : "night");
+  }, [journalThemeMode, onJournalThemeModeChange]);
 
   useEffect(() => {
     let active = true;
@@ -2911,6 +3037,45 @@ function DashboardScreen({
     [dailyTarget?.targetCarbsGram, dailyTarget?.targetFatGram, dailyTarget?.targetProteinGram, summary],
   );
 
+  const macroChartColors = useMemo(
+    () => ({
+      carbs: journalTheme.carbs,
+      protein: journalTheme.protein,
+      fat: journalTheme.fat,
+      fiber: journalTheme.fiber,
+    }),
+    [journalTheme],
+  );
+
+  const calorieTargetForChart = useMemo(() => {
+    const profileTarget = Number(dailyTarget?.targetCalories ?? 0);
+    if (profileTarget > 0) {
+      return profileTarget + Math.max(0, Number(exerciseSummary.calories ?? 0));
+    }
+    return Math.max(1, Number(summary.calories ?? 0), Number(exerciseSummary.calories ?? 0));
+  }, [dailyTarget?.targetCalories, exerciseSummary.calories, summary.calories]);
+
+  const calorieProgress = useMemo(() => {
+    return clamp(Number(summary.calories ?? 0) / calorieTargetForChart, 0, 1);
+  }, [calorieTargetForChart, summary.calories]);
+
+  const calorieRingSegments = useMemo(() => {
+    const activeCount = Math.round(calorieProgress * CALORIE_RING_SEGMENT_COUNT);
+    const activeColor = remainCalories !== null && remainCalories < 0 ? journalTheme.danger : journalTheme.calorie;
+    return Array.from({ length: CALORIE_RING_SEGMENT_COUNT }, (_, index) => {
+      const angle = (index / CALORIE_RING_SEGMENT_COUNT) * Math.PI * 2 - Math.PI / 2;
+      return {
+        backgroundColor: index < activeCount ? activeColor : journalTheme.chartTrack,
+        left: CALORIE_RING_CENTER + Math.cos(angle) * CALORIE_RING_RADIUS - 2.5,
+        top: CALORIE_RING_CENTER + Math.sin(angle) * CALORIE_RING_RADIUS - 7,
+        transform: [{ rotate: `${(index / CALORIE_RING_SEGMENT_COUNT) * 360}deg` }],
+      };
+    });
+  }, [calorieProgress, journalTheme.calorie, journalTheme.chartTrack, journalTheme.danger, remainCalories]);
+
+  const calorieCenterValue = remainCalories === null ? netCalories : remainCalories;
+  const calorieCenterLabel = remainCalories === null ? "净摄入 kcal" : "剩余 kcal";
+
   const sortedLogs = useMemo(() => {
     return [...logs].sort((a, b) => new Date(b.loggedAt).getTime() - new Date(a.loggedAt).getTime());
   }, [logs]);
@@ -3013,58 +3178,58 @@ function DashboardScreen({
       target: dailyTarget,
     });
     return (
-      <SafeAreaView style={styles.journalSafe}>
+      <SafeAreaView style={[styles.journalSafe, themedJournal.screen]}>
         <View style={styles.journalContainer}>
           <View style={styles.logDetailHeader}>
-            <Pressable style={styles.logDetailBackButton} onPress={() => setDetailExerciseId(null)}>
-              <Text style={styles.logDetailBackText}>← 返回</Text>
+            <Pressable style={[styles.logDetailBackButton, themedJournal.actionButton]} onPress={() => setDetailExerciseId(null)}>
+              <Text style={[styles.logDetailBackText, themedJournal.text]}>← 返回</Text>
             </Pressable>
-            <Text style={styles.logDetailHeaderTime}>{formatDateTimeLabel(detailExercise.loggedAt)}</Text>
+            <Text style={[styles.logDetailHeaderTime, themedJournal.mutedText]}>{formatDateTimeLabel(detailExercise.loggedAt)}</Text>
           </View>
 
           <ScrollView contentContainerStyle={styles.logDetailScrollContent}>
-            <View style={styles.logDetailCard}>
+            <View style={[styles.logDetailCard, themedJournal.surface]}>
               <View style={styles.logDetailTopContent}>
-                <Text style={styles.logDetailTitle}>运动：{detailExercise.exerciseType || '运动'}</Text>
-                <Text style={styles.logDetailSubtitle}>{detailExercise.note || '无补充描述'}</Text>
+                <Text style={[styles.logDetailTitle, themedJournal.text]}>运动：{detailExercise.exerciseType || '运动'}</Text>
+                <Text style={[styles.logDetailSubtitle, themedJournal.mutedText]}>{detailExercise.note || '无补充描述'}</Text>
               </View>
 
               <View style={styles.logDetailSummaryRow}>
-                <View style={styles.logDetailSummaryCell}>
-                  <Text style={styles.logDetailSummaryLabel}>消耗</Text>
-                  <Text style={styles.logDetailSummaryValue}>{Math.round(Number(detailExercise.calories ?? 0))}</Text>
+                <View style={[styles.logDetailSummaryCell, themedJournal.surfaceSoft]}>
+                  <Text style={[styles.logDetailSummaryLabel, themedJournal.mutedText]}>消耗</Text>
+                  <Text style={[styles.logDetailSummaryValue, themedJournal.text]}>{Math.round(Number(detailExercise.calories ?? 0))}</Text>
                 </View>
-                <View style={styles.logDetailSummaryCell}>
-                  <Text style={styles.logDetailSummaryLabel}>时长</Text>
-                  <Text style={styles.logDetailSummaryValue}>{Math.round(Number(detailExercise.durationMin ?? 0))}分</Text>
+                <View style={[styles.logDetailSummaryCell, themedJournal.surfaceSoft]}>
+                  <Text style={[styles.logDetailSummaryLabel, themedJournal.mutedText]}>时长</Text>
+                  <Text style={[styles.logDetailSummaryValue, themedJournal.text]}>{Math.round(Number(detailExercise.durationMin ?? 0))}分</Text>
                 </View>
-                <View style={styles.logDetailSummaryCell}>
-                  <Text style={styles.logDetailSummaryLabel}>强度</Text>
-                  <Text style={styles.logDetailSummaryValue}>{formatIntensity(detailExercise.intensity)}</Text>
+                <View style={[styles.logDetailSummaryCell, themedJournal.surfaceSoft]}>
+                  <Text style={[styles.logDetailSummaryLabel, themedJournal.mutedText]}>强度</Text>
+                  <Text style={[styles.logDetailSummaryValue, themedJournal.text]}>{formatIntensity(detailExercise.intensity)}</Text>
                 </View>
-                <View style={styles.logDetailSummaryCell}>
-                  <Text style={styles.logDetailSummaryLabel}>MET</Text>
-                  <Text style={styles.logDetailSummaryValue}>{roundTo(Number(detailExercise.met ?? 0), 1)}</Text>
+                <View style={[styles.logDetailSummaryCell, themedJournal.surfaceSoft]}>
+                  <Text style={[styles.logDetailSummaryLabel, themedJournal.mutedText]}>MET</Text>
+                  <Text style={[styles.logDetailSummaryValue, themedJournal.text]}>{roundTo(Number(detailExercise.met ?? 0), 1)}</Text>
                 </View>
               </View>
             </View>
 
-            <View style={styles.logDetailCard}>
-              <Text style={styles.logDetailSectionTitle}>运动分析</Text>
-              <Text style={styles.logDetailSectionText}>{exerciseHealthText}</Text>
+            <View style={[styles.logDetailCard, themedJournal.surface]}>
+              <Text style={[styles.logDetailSectionTitle, themedJournal.text]}>运动分析</Text>
+              <Text style={[styles.logDetailSectionText, themedJournal.softText]}>{exerciseHealthText}</Text>
             </View>
 
-            <View style={styles.logDetailCard}>
-              <Text style={styles.logDetailSectionTitle}>运动与当天目标</Text>
+            <View style={[styles.logDetailCard, themedJournal.surface]}>
+              <Text style={[styles.logDetailSectionTitle, themedJournal.text]}>运动与当天目标</Text>
               {detailExerciseRows.map((row) => (
-                <View key={row.label} style={styles.logDetailNutrientRow}>
-                  <Text style={styles.logDetailNutrientLabel}>{row.label}</Text>
-                  <Text style={styles.logDetailNutrientValue}>{row.value}</Text>
+                <View key={row.label} style={[styles.logDetailNutrientRow, { borderTopColor: journalTheme.border }]}>
+                  <Text style={[styles.logDetailNutrientLabel, themedJournal.softText]}>{row.label}</Text>
+                  <Text style={[styles.logDetailNutrientValue, themedJournal.text]}>{row.value}</Text>
                 </View>
               ))}
             </View>
 
-            <Text style={styles.logDetailAiFootnote}>{formatAIUsageText(detailExercise)}</Text>
+            <Text style={[styles.logDetailAiFootnote, themedJournal.mutedText]}>{formatAIUsageText(detailExercise)}</Text>
           </ScrollView>
         </View>
       </SafeAreaView>
@@ -3074,34 +3239,34 @@ function DashboardScreen({
   if (detailLog) {
     const detailHealthText = buildHealthAnalysis(detailLog, dailyTarget);
     return (
-      <SafeAreaView style={styles.journalSafe}>
+      <SafeAreaView style={[styles.journalSafe, themedJournal.screen]}>
         <View style={styles.journalContainer}>
           <View style={styles.logDetailHeader}>
-            <Pressable style={styles.logDetailBackButton} onPress={() => setDetailLogId(null)}>
-              <Text style={styles.logDetailBackText}>← 返回</Text>
+            <Pressable style={[styles.logDetailBackButton, themedJournal.actionButton]} onPress={() => setDetailLogId(null)}>
+              <Text style={[styles.logDetailBackText, themedJournal.text]}>← 返回</Text>
             </Pressable>
-            <Text style={styles.logDetailHeaderTime}>{formatDateTimeLabel(detailLog.loggedAt)}</Text>
+            <Text style={[styles.logDetailHeaderTime, themedJournal.mutedText]}>{formatDateTimeLabel(detailLog.loggedAt)}</Text>
           </View>
 
           <ScrollView contentContainerStyle={styles.logDetailScrollContent}>
-            <View style={styles.logDetailCard}>
+            <View style={[styles.logDetailCard, themedJournal.surface]}>
               <View style={styles.logDetailTop}>
                 {detailLog.imageUri ? <Image source={{ uri: detailLog.imageUri }} style={styles.logDetailImage} /> : null}
                 <View style={styles.logDetailTopContent}>
-                  <Text style={styles.logDetailTitle}>{summarizeFoodFromLog(detailLog)}</Text>
-                  <Text style={styles.logDetailSubtitle}>{detailLog.note || '无补充描述'}</Text>
+                  <Text style={[styles.logDetailTitle, themedJournal.text]}>{summarizeFoodFromLog(detailLog)}</Text>
+                  <Text style={[styles.logDetailSubtitle, themedJournal.mutedText]}>{detailLog.note || '无补充描述'}</Text>
                 </View>
               </View>
 
               {detailItems.length > 0 ? (
                 <View style={styles.logDetailItemsList}>
                   {detailItems.map((item, idx) => (
-                    <View key={`${item.name}-${idx}`} style={styles.logDetailItemRow}>
-                      <Text style={styles.logDetailItemName}>
+                    <View key={`${item.name}-${idx}`} style={[styles.logDetailItemRow, { borderTopColor: journalTheme.border }]}>
+                      <Text style={[styles.logDetailItemName, themedJournal.text]}>
                         {item.name}
                         {item.estimatedWeightGram ? ` (${Math.round(item.estimatedWeightGram)}g)` : ''}
                       </Text>
-                      <Text style={styles.logDetailItemNutrition}>
+                      <Text style={[styles.logDetailItemNutrition, themedJournal.softText]}>
                         热量 {Math.round(item.calories)} 千卡 · 碳水 {formatGram(item.carbsGram)} · 蛋白质 {formatGram(item.proteinGram)} · 脂肪{' '}
                         {formatGram(item.fatGram)}
                       </Text>
@@ -3111,41 +3276,41 @@ function DashboardScreen({
               ) : null}
 
               <View style={styles.logDetailSummaryRow}>
-                <View style={styles.logDetailSummaryCell}>
-                  <Text style={styles.logDetailSummaryLabel}>卡路里</Text>
-                  <Text style={styles.logDetailSummaryValue}>{Math.round(detailLog.calories)}</Text>
+                <View style={[styles.logDetailSummaryCell, themedJournal.surfaceSoft]}>
+                  <Text style={[styles.logDetailSummaryLabel, themedJournal.mutedText]}>卡路里</Text>
+                  <Text style={[styles.logDetailSummaryValue, themedJournal.text]}>{Math.round(detailLog.calories)}</Text>
                 </View>
-                <View style={styles.logDetailSummaryCell}>
-                  <Text style={styles.logDetailSummaryLabel}>碳水</Text>
-                  <Text style={styles.logDetailSummaryValue}>{formatGram(detailLog.carbsGram)}</Text>
+                <View style={[styles.logDetailSummaryCell, themedJournal.surfaceSoft]}>
+                  <Text style={[styles.logDetailSummaryLabel, themedJournal.mutedText]}>碳水</Text>
+                  <Text style={[styles.logDetailSummaryValue, themedJournal.text]}>{formatGram(detailLog.carbsGram)}</Text>
                 </View>
-                <View style={styles.logDetailSummaryCell}>
-                  <Text style={styles.logDetailSummaryLabel}>蛋白质</Text>
-                  <Text style={styles.logDetailSummaryValue}>{formatGram(detailLog.proteinGram)}</Text>
+                <View style={[styles.logDetailSummaryCell, themedJournal.surfaceSoft]}>
+                  <Text style={[styles.logDetailSummaryLabel, themedJournal.mutedText]}>蛋白质</Text>
+                  <Text style={[styles.logDetailSummaryValue, themedJournal.text]}>{formatGram(detailLog.proteinGram)}</Text>
                 </View>
-                <View style={styles.logDetailSummaryCell}>
-                  <Text style={styles.logDetailSummaryLabel}>脂肪</Text>
-                  <Text style={styles.logDetailSummaryValue}>{formatGram(detailLog.fatGram)}</Text>
+                <View style={[styles.logDetailSummaryCell, themedJournal.surfaceSoft]}>
+                  <Text style={[styles.logDetailSummaryLabel, themedJournal.mutedText]}>脂肪</Text>
+                  <Text style={[styles.logDetailSummaryValue, themedJournal.text]}>{formatGram(detailLog.fatGram)}</Text>
                 </View>
               </View>
             </View>
 
-            <View style={styles.logDetailCard}>
-              <Text style={styles.logDetailSectionTitle}>健康分析</Text>
-              <Text style={styles.logDetailSectionText}>{detailHealthText}</Text>
+            <View style={[styles.logDetailCard, themedJournal.surface]}>
+              <Text style={[styles.logDetailSectionTitle, themedJournal.text]}>健康分析</Text>
+              <Text style={[styles.logDetailSectionText, themedJournal.softText]}>{detailHealthText}</Text>
             </View>
 
-            <View style={styles.logDetailCard}>
-              <Text style={styles.logDetailSectionTitle}>营养成分</Text>
+            <View style={[styles.logDetailCard, themedJournal.surface]}>
+              <Text style={[styles.logDetailSectionTitle, themedJournal.text]}>营养成分</Text>
               {detailNutrientRows.map((row) => (
-                <View key={row.label} style={styles.logDetailNutrientRow}>
-                  <Text style={styles.logDetailNutrientLabel}>{row.label}</Text>
-                  <Text style={styles.logDetailNutrientValue}>{row.value}</Text>
+                <View key={row.label} style={[styles.logDetailNutrientRow, { borderTopColor: journalTheme.border }]}>
+                  <Text style={[styles.logDetailNutrientLabel, themedJournal.softText]}>{row.label}</Text>
+                  <Text style={[styles.logDetailNutrientValue, themedJournal.text]}>{row.value}</Text>
                 </View>
               ))}
             </View>
 
-            <Text style={styles.logDetailAiFootnote}>{formatAIUsageText(detailLog)}</Text>
+            <Text style={[styles.logDetailAiFootnote, themedJournal.mutedText]}>{formatAIUsageText(detailLog)}</Text>
           </ScrollView>
         </View>
       </SafeAreaView>
@@ -3153,33 +3318,37 @@ function DashboardScreen({
   }
 
   return (
-    <SafeAreaView style={styles.journalSafe}>
+    <SafeAreaView style={[styles.journalSafe, themedJournal.screen]}>
       <View style={styles.journalContainer}>
         <View style={styles.journalTopBar}>
-          <Pressable style={styles.journalDateButton} onPress={() => setCalendarExpanded((prev) => !prev)}>
-            <Text style={styles.journalDateText}>{selectedDate === todayDateString() ? '今天' : selectedDate}</Text>
-            <Text style={styles.journalDateArrow}>{calendarExpanded ? '▲' : '▼'}</Text>
+          <Pressable style={[styles.journalDateButton, themedJournal.surface]} onPress={() => setCalendarExpanded((prev) => !prev)}>
+            <Text style={[styles.journalDateText, themedJournal.text]}>{selectedDate === todayDateString() ? '今天' : selectedDate}</Text>
+            <Text style={[styles.journalDateArrow, themedJournal.mutedText]}>{calendarExpanded ? '▲' : '▼'}</Text>
           </Pressable>
-          <Text style={styles.journalRemainText}>{formatSignedKcalChange(calorieChangeFromPreviousDay)}</Text>
+          <Text style={[styles.journalRemainText, themedJournal.softText]}>{formatSignedKcalChange(calorieChangeFromPreviousDay)}</Text>
+          <Pressable style={[styles.journalThemeToggle, themedJournal.surface]} onPress={toggleJournalTheme}>
+            <Text style={[styles.journalThemeToggleIcon, themedJournal.text]}>{journalThemeMode === "night" ? "☾" : "☀"}</Text>
+            <Text style={[styles.journalThemeToggleText, themedJournal.text]}>{journalThemeMode === "night" ? "夜间" : "日间"}</Text>
+          </Pressable>
         </View>
 
         {calendarExpanded ? (
-          <View style={styles.journalCalendarCard}>
+          <View style={[styles.journalCalendarCard, themedJournal.surface]}>
             <View style={styles.cardHeaderRow}>
-              <Pressable style={styles.journalMiniButton} onPress={() => setSelectedMonth(shiftMonthString(selectedMonth, -1))}>
-                <Text style={styles.journalMiniButtonText}>上月</Text>
+              <Pressable style={[styles.journalMiniButton, themedJournal.surfaceAlt]} onPress={() => setSelectedMonth(shiftMonthString(selectedMonth, -1))}>
+                <Text style={[styles.journalMiniButtonText, { color: journalTheme.accent }]}>上月</Text>
               </Pressable>
-              <Text style={styles.journalMonthText}>{selectedMonth}</Text>
-              <Pressable style={styles.journalMiniButton} onPress={() => setSelectedMonth(shiftMonthString(selectedMonth, 1))}>
-                <Text style={styles.journalMiniButtonText}>下月</Text>
+              <Text style={[styles.journalMonthText, themedJournal.text]}>{selectedMonth}</Text>
+              <Pressable style={[styles.journalMiniButton, themedJournal.surfaceAlt]} onPress={() => setSelectedMonth(shiftMonthString(selectedMonth, 1))}>
+                <Text style={[styles.journalMiniButtonText, { color: journalTheme.accent }]}>下月</Text>
               </Pressable>
             </View>
-            {calendarLoading ? <Text style={styles.journalMutedText}>日历加载中...</Text> : null}
+            {calendarLoading ? <Text style={[styles.journalMutedText, themedJournal.mutedText]}>日历加载中...</Text> : null}
 
             <View style={styles.calendarWeekRow}>
               {['日', '一', '二', '三', '四', '五', '六'].map((label) => (
                 <View key={label} style={styles.calendarWeekCell}>
-                  <Text style={styles.journalWeekLabel}>{label}</Text>
+                  <Text style={[styles.journalWeekLabel, themedJournal.mutedText]}>{label}</Text>
                 </View>
               ))}
             </View>
@@ -3193,13 +3362,14 @@ function DashboardScreen({
                     <Pressable
                       style={[
                         styles.journalCalendarCell,
-                        active && styles.journalCalendarCellActive,
+                        themedJournal.surfaceAlt,
+                        active && themedJournal.activeChip,
                         !cell.inCurrentMonth && styles.calendarCellButtonMuted,
                       ]}
                       onPress={() => setSelectedDate(cell.date)}
                     >
-                      <Text style={[styles.journalCalendarDayText, active && styles.journalCalendarDayTextActive]}>{cell.day}</Text>
-                      <Text style={[styles.journalCalendarCalText, active && styles.journalCalendarDayTextActive]}>
+                      <Text style={[styles.journalCalendarDayText, themedJournal.text, active && themedJournal.activeText]}>{cell.day}</Text>
+                      <Text style={[styles.journalCalendarCalText, themedJournal.mutedText, active && themedJournal.activeText]}>
                         {dayStats ? Math.round(dayStats.calories) : '-'}
                       </Text>
                     </Pressable>
@@ -3220,63 +3390,83 @@ function DashboardScreen({
               return (
                 <Pressable
                   key={cell.date}
-                  style={[styles.journalWeekChip, active && styles.journalWeekChipActive]}
+                  style={[styles.journalWeekChip, themedJournal.surfaceAlt, active && themedJournal.activeChip]}
                   onPress={() => setSelectedDate(cell.date)}
                 >
-                  <Text style={[styles.journalWeekChipTop, active && styles.journalWeekChipTextActive]}>{cell.weekLabel}</Text>
-                  <Text style={[styles.journalWeekChipBottom, active && styles.journalWeekChipTextActive]}>{cell.day}日</Text>
+                  <Text style={[styles.journalWeekChipTop, themedJournal.mutedText, active && themedJournal.activeText]}>{cell.weekLabel}</Text>
+                  <Text style={[styles.journalWeekChipBottom, themedJournal.text, active && themedJournal.activeText]}>{cell.day}日</Text>
                 </Pressable>
               );
             })}
           </ScrollView>
         )}
 
-        <View style={styles.journalSummaryRow}>
-          <View style={styles.journalSummaryCard}>
-            <Text style={styles.journalCardTitle}>卡路里</Text>
-            <View style={styles.journalStatGrid}>
-              <View style={styles.journalStatCell}>
-                <Text style={styles.journalStatValue}>{Math.round(summary.calories)}</Text>
-                <Text style={styles.journalStatLabel}>食物</Text>
-              </View>
-              <View style={styles.journalStatCell}>
-                <Text style={styles.journalStatValue}>{Math.round(exerciseSummary.calories)}</Text>
-                <Text style={styles.journalStatLabel}>锻炼</Text>
-              </View>
-              <View style={styles.journalStatCell}>
-                <Text style={styles.journalStatValue}>{remainCalories === null ? '-' : remainCalories}</Text>
-                <Text style={styles.journalStatLabel}>剩余</Text>
+        <View style={[styles.journalChartCard, themedJournal.surface]}>
+          <View style={styles.journalChartContent}>
+            <View style={styles.journalCalorieChart}>
+              <View style={[styles.journalCalorieRing, { backgroundColor: journalTheme.surface }]}>
+                {calorieRingSegments.map((segmentStyle, index) => (
+                  <View key={index} style={[styles.journalCalorieSegment, segmentStyle]} />
+                ))}
+                <View style={[styles.journalCalorieCenter, { backgroundColor: journalTheme.surface }]}>
+                  <Text
+                    style={[
+                      styles.journalCalorieValue,
+                      { color: remainCalories !== null && remainCalories < 0 ? journalTheme.danger : journalTheme.text },
+                    ]}
+                  >
+                    {Math.round(calorieCenterValue)}
+                  </Text>
+                  <Text style={[styles.journalCalorieLabel, themedJournal.mutedText]}>{calorieCenterLabel}</Text>
+                </View>
               </View>
             </View>
-          </View>
 
-          <View style={styles.journalSummaryCard}>
-            <Text style={styles.journalCardTitle}>宏量营养</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.journalMacroRow}>
+            <View style={styles.journalMacroChart}>
               {nutrientCards.map((item) => {
                 const target = item.target && item.target > 0 ? item.target : null;
+                const fallbackTarget = item.key === "fiber" ? 25 : Math.max(item.current, 1);
+                const progressBase = target ?? fallbackTarget;
+                const progress = clamp(item.current / Math.max(progressBase, 1), 0, 1);
+                const color = macroChartColors[item.key as keyof typeof macroChartColors];
                 return (
-                  <View key={item.key} style={styles.journalMacroItem}>
-                    <Text style={styles.journalMacroLabel}>{item.label}</Text>
-                    <Text style={styles.journalMacroValue}>
-                      {Math.round(item.current * 10) / 10}
-                      {item.unit}
-                      {target ? ` / ${Math.round(target * 10) / 10}${item.unit}` : ''}
-                    </Text>
+                  <View key={item.key} style={styles.journalMacroChartRow}>
+                    <View style={styles.journalMacroHeader}>
+                      <Text style={[styles.journalMacroChartLabel, themedJournal.text]}>{item.label}</Text>
+                      <Text style={[styles.journalMacroChartValue, themedJournal.softText]}>
+                        {Math.round(item.current * 10) / 10}
+                        {item.unit}
+                        {target ? ` / ${Math.round(target * 10) / 10}${item.unit}` : ""}
+                      </Text>
+                    </View>
+                    <View style={[styles.journalMacroTrack, { backgroundColor: journalTheme.chartTrack }]}>
+                      <View style={[styles.journalMacroFill, { backgroundColor: color, width: `${progress * 100}%` }]} />
+                    </View>
                   </View>
                 );
               })}
-            </ScrollView>
+            </View>
+          </View>
+
+          <View style={styles.journalCalorieMetaRow}>
+            <View style={styles.journalCalorieMetaItem}>
+              <View style={[styles.journalCalorieMetaDot, { backgroundColor: journalTheme.calorie }]} />
+              <Text style={[styles.journalCalorieMetaText, themedJournal.softText]}>摄入 {Math.round(summary.calories)} kcal</Text>
+            </View>
+            <View style={styles.journalCalorieMetaItem}>
+              <View style={[styles.journalCalorieMetaDot, { backgroundColor: journalTheme.exercise }]} />
+              <Text style={[styles.journalCalorieMetaText, themedJournal.softText]}>运动 {Math.round(exerciseSummary.calories)} kcal</Text>
+            </View>
           </View>
         </View>
 
-        <ScrollView style={styles.journalChatList} contentContainerStyle={styles.journalChatListContent}>
-          {loading ? <ActivityIndicator size='large' color='#1e5eff' /> : null}
+        <ScrollView style={[styles.journalChatList, themedJournal.surfaceAlt]} contentContainerStyle={styles.journalChatListContent}>
+          {loading ? <ActivityIndicator size='large' color={journalTheme.accent} /> : null}
 
           {!loading && sortedJournalEntries.length === 0 ? (
-            <View style={styles.journalEmptyCard}>
-              <Text style={styles.journalEmptyTitle}>今天还没有记录</Text>
-              <Text style={styles.journalEmptyText}>可在下方输入饮食或运动描述，系统会自动识别并生成记录卡片。</Text>
+            <View style={[styles.journalEmptyCard, themedJournal.surface]}>
+              <Text style={[styles.journalEmptyTitle, themedJournal.text]}>今天还没有记录</Text>
+              <Text style={[styles.journalEmptyText, themedJournal.mutedText]}>可在下方输入饮食或运动描述，系统会自动识别并生成记录卡片。</Text>
             </View>
           ) : null}
 
@@ -3284,7 +3474,7 @@ function DashboardScreen({
             if (entry.kind === 'exercise') {
               const exercise = entry.exercise;
               return (
-                <View key={`exercise-${exercise.id}`} style={styles.journalEntryCard}>
+                <View key={`exercise-${exercise.id}`} style={[styles.journalEntryCard, themedJournal.surface]}>
                   <Pressable
                     style={styles.journalEntryMain}
                     onPress={() => {
@@ -3293,24 +3483,24 @@ function DashboardScreen({
                     }}
                   >
                     <View style={styles.journalEntryTextWrap}>
-                      <Text style={styles.journalEntryTitle}>运动：{exercise.exerciseType}</Text>
-                      {exercise.note ? <Text style={styles.journalEntryNote}>{exercise.note}</Text> : null}
+                      <Text style={[styles.journalEntryTitle, themedJournal.text]}>运动：{exercise.exerciseType}</Text>
+                      {exercise.note ? <Text style={[styles.journalEntryNote, themedJournal.mutedText]}>{exercise.note}</Text> : null}
                     </View>
                     <View style={styles.journalEntryMetrics}>
-                      <Text style={styles.journalEntryMetric}>消耗 {Math.round(exercise.calories)} 千卡</Text>
-                      <Text style={styles.journalEntryMetric}>时长 {Math.round(exercise.durationMin)} 分钟</Text>
-                      <Text style={styles.journalEntryMetric}>{formatIntensity(exercise.intensity)}</Text>
-                      <Text style={styles.journalEntryMetric}>MET {Math.round(exercise.met * 10) / 10}</Text>
+                      <Text style={[styles.journalEntryMetric, themedJournal.metricPill]}>消耗 {Math.round(exercise.calories)} 千卡</Text>
+                      <Text style={[styles.journalEntryMetric, themedJournal.metricPill]}>时长 {Math.round(exercise.durationMin)} 分钟</Text>
+                      <Text style={[styles.journalEntryMetric, themedJournal.metricPill]}>{formatIntensity(exercise.intensity)}</Text>
+                      <Text style={[styles.journalEntryMetric, themedJournal.metricPill]}>MET {Math.round(exercise.met * 10) / 10}</Text>
                     </View>
                   </Pressable>
                   <View style={styles.journalEntryFooter}>
-                    <Text style={styles.journalEntryTime}>{formatClockTime(exercise.loggedAt)}</Text>
+                    <Text style={[styles.journalEntryTime, themedJournal.mutedText]}>{formatClockTime(exercise.loggedAt)}</Text>
                     <View style={styles.journalEntryActions}>
-                      <Pressable style={styles.journalEntryActionButton} onPress={() => openEditExerciseModal(exercise)}>
-                        <Text style={styles.journalEntryActionText}>编辑</Text>
+                      <Pressable style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => openEditExerciseModal(exercise)}>
+                        <Text style={[styles.journalEntryActionText, themedJournal.text]}>编辑</Text>
                       </Pressable>
-                      <Pressable style={styles.journalEntryActionButton} onPress={() => openExerciseMoreActions(exercise)}>
-                        <Text style={styles.journalEntryActionText}>更多</Text>
+                      <Pressable style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => openExerciseMoreActions(exercise)}>
+                        <Text style={[styles.journalEntryActionText, themedJournal.text]}>更多</Text>
                       </Pressable>
                     </View>
                   </View>
@@ -3320,7 +3510,7 @@ function DashboardScreen({
             const log = entry.log;
             const items = parseLogItems(log.items);
             return (
-              <View key={`food-${log.id}`} style={styles.journalEntryCard}>
+              <View key={`food-${log.id}`} style={[styles.journalEntryCard, themedJournal.surface]}>
                 <Pressable
                   style={styles.journalEntryMain}
                   onPress={() => {
@@ -3331,38 +3521,38 @@ function DashboardScreen({
                   <View style={styles.journalEntryTop}>
                     {log.imageUri ? <Image source={{ uri: log.imageUri }} style={styles.journalEntryImage} /> : null}
                     <View style={styles.journalEntryTextWrap}>
-                      <Text style={styles.journalEntryTitle}>{summarizeFoodFromLog(log)}</Text>
-                      {log.note ? <Text style={styles.journalEntryNote}>{log.note}</Text> : null}
+                      <Text style={[styles.journalEntryTitle, themedJournal.text]}>{summarizeFoodFromLog(log)}</Text>
+                      {log.note ? <Text style={[styles.journalEntryNote, themedJournal.mutedText]}>{log.note}</Text> : null}
                     </View>
                   </View>
 
                   {items.length > 0 ? (
                     <View style={styles.journalEntryItems}>
                       {items.slice(0, 3).map((item, index) => (
-                        <Text key={`${item.name}-${index}`} style={styles.journalEntryItemText}>
+                        <Text key={`${item.name}-${index}`} style={[styles.journalEntryItemText, themedJournal.softText]}>
                           {item.name} · 热量 {Math.round(item.calories)} · 碳水 {formatGram(item.carbsGram)} · 蛋白质 {formatGram(item.proteinGram)}
                         </Text>
                       ))}
-                      {items.length > 3 ? <Text style={styles.journalEntryMoreHint}>点击查看全部 {items.length} 项</Text> : null}
+                      {items.length > 3 ? <Text style={[styles.journalEntryMoreHint, { color: journalTheme.accent }]}>点击查看全部 {items.length} 项</Text> : null}
                     </View>
                   ) : null}
 
                   <View style={styles.journalEntryMetrics}>
-                    <Text style={styles.journalEntryMetric}>热量 {Math.round(log.calories)} 千卡</Text>
-                    <Text style={styles.journalEntryMetric}>碳水 {formatGram(log.carbsGram)}</Text>
-                    <Text style={styles.journalEntryMetric}>蛋白质 {formatGram(log.proteinGram)}</Text>
-                    <Text style={styles.journalEntryMetric}>脂肪 {formatGram(log.fatGram)}</Text>
+                    <Text style={[styles.journalEntryMetric, themedJournal.metricPill]}>热量 {Math.round(log.calories)} 千卡</Text>
+                    <Text style={[styles.journalEntryMetric, themedJournal.metricPill]}>碳水 {formatGram(log.carbsGram)}</Text>
+                    <Text style={[styles.journalEntryMetric, themedJournal.metricPill]}>蛋白质 {formatGram(log.proteinGram)}</Text>
+                    <Text style={[styles.journalEntryMetric, themedJournal.metricPill]}>脂肪 {formatGram(log.fatGram)}</Text>
                   </View>
                 </Pressable>
 
                 <View style={styles.journalEntryFooter}>
-                  <Text style={styles.journalEntryTime}>{formatClockTime(log.loggedAt)}</Text>
+                  <Text style={[styles.journalEntryTime, themedJournal.mutedText]}>{formatClockTime(log.loggedAt)}</Text>
                   <View style={styles.journalEntryActions}>
-                    <Pressable style={styles.journalEntryActionButton} onPress={() => openEditLogModal(log)}>
-                      <Text style={styles.journalEntryActionText}>编辑</Text>
+                    <Pressable style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => openEditLogModal(log)}>
+                      <Text style={[styles.journalEntryActionText, themedJournal.text]}>编辑</Text>
                     </Pressable>
-                    <Pressable style={styles.journalEntryActionButton} onPress={() => openLogMoreActions(log)}>
-                      <Text style={styles.journalEntryActionText}>更多</Text>
+                    <Pressable style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => openLogMoreActions(log)}>
+                      <Text style={[styles.journalEntryActionText, themedJournal.text]}>更多</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -3374,44 +3564,48 @@ function DashboardScreen({
         {conversationImageUri ? (
           <View style={styles.journalPendingImageWrap}>
             <Image source={{ uri: conversationImageUri }} style={styles.journalPendingImage} />
-            <Pressable style={styles.journalPendingRemove} onPress={clearConversationImage}>
-              <Text style={styles.journalPendingRemoveText}>移除图片</Text>
+            <Pressable style={[styles.journalPendingRemove, themedJournal.actionButton]} onPress={clearConversationImage}>
+              <Text style={[styles.journalPendingRemoveText, themedJournal.text]}>移除图片</Text>
             </Pressable>
           </View>
         ) : null}
 
         <View style={styles.journalComposerRow}>
-          <Pressable style={styles.journalMediaButton} onPress={() => void pickConversationImage('library')}>
-            <Text style={styles.journalMediaButtonText}>🖼</Text>
+          <Pressable style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('library')}>
+            <Text style={[styles.journalMediaButtonText, themedJournal.text]}>🖼</Text>
           </Pressable>
-          <Pressable style={styles.journalMediaButton} onPress={() => void pickConversationImage('camera')}>
-            <Text style={styles.journalMediaButtonText}>📷</Text>
+          <Pressable style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('camera')}>
+            <Text style={[styles.journalMediaButtonText, themedJournal.text]}>📷</Text>
           </Pressable>
           <TextInput
-            style={styles.journalInput}
+            style={[styles.journalInput, themedJournal.input]}
             value={conversationInput}
             onChangeText={setConversationInput}
             placeholder='你吃了什么或做了什么锻炼？可加图片说明。'
-            placeholderTextColor='#8f9bb0'
+            placeholderTextColor={journalTheme.placeholder}
             multiline
           />
-          <Pressable style={styles.journalSendButton} onPress={() => void sendConversationMessage()} disabled={conversationLoading}>
+          <Pressable
+            style={[styles.journalSendButton, { backgroundColor: conversationLoading ? journalTheme.borderStrong : journalTheme.accent }]}
+            onPress={() => void sendConversationMessage()}
+            disabled={conversationLoading}
+          >
             <Text style={styles.journalSendButtonText}>{conversationLoading ? '发送中' : '发送'}</Text>
           </Pressable>
         </View>
 
         <View style={styles.journalComposerMetaRow}>
-          <Text style={styles.journalMutedText}>可见范围</Text>
+          <Text style={[styles.journalMutedText, themedJournal.mutedText]}>可见范围</Text>
           <View style={styles.journalVisibilityRow}>
             {visibilityOptions.map((option) => {
               const active = conversationVisibility === option.value;
               return (
                 <Pressable
                   key={option.value}
-                  style={[styles.journalVisibilityChip, active && styles.journalVisibilityChipActive]}
+                  style={[styles.journalVisibilityChip, themedJournal.surfaceAlt, active && themedJournal.activeChip]}
                   onPress={() => setConversationVisibility(option.value)}
                 >
-                  <Text style={[styles.journalVisibilityText, active && styles.journalVisibilityTextActive]}>{option.label}</Text>
+                  <Text style={[styles.journalVisibilityText, themedJournal.mutedText, active && themedJournal.activeText]}>{option.label}</Text>
                 </Pressable>
               );
             })}
@@ -5199,6 +5393,39 @@ function SocialNavigator({ token, user, onLogout }: { token: string; user: AuthU
 }
 
 function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void }) {
+  const [journalThemeMode, setJournalThemeMode] = useState<JournalThemeMode>("night");
+  const [journalThemeLoaded, setJournalThemeLoaded] = useState(false);
+  const journalTheme = journalThemeTokens[journalThemeMode];
+
+  useEffect(() => {
+    let active = true;
+    const loadJournalTheme = async () => {
+      try {
+        const saved = parseJournalThemeMode(await AsyncStorage.getItem(JOURNAL_THEME_STORAGE_KEY));
+        if (active && saved) {
+          setJournalThemeMode(saved);
+        }
+      } catch {
+        // ignore theme preference load errors
+      } finally {
+        if (active) {
+          setJournalThemeLoaded(true);
+        }
+      }
+    };
+    void loadJournalTheme();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!journalThemeLoaded) {
+      return;
+    }
+    void AsyncStorage.setItem(JOURNAL_THEME_STORAGE_KEY, journalThemeMode);
+  }, [journalThemeLoaded, journalThemeMode]);
+
   return (
     <NavigationContainer>
       <Tab.Navigator
@@ -5206,22 +5433,32 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
           headerShown: false,
           tabBarStyle: {
             height: 62,
-            backgroundColor: "#0f1724",
-            borderTopColor: "#273245",
+            backgroundColor: journalTheme.tabBar,
+            borderTopColor: journalTheme.tabBorder,
           },
+          tabBarActiveTintColor: journalTheme.accent,
+          tabBarInactiveTintColor: journalTheme.textMuted,
           tabBarLabelStyle: {
-            color: "#d9e2f5",
             fontSize: 12,
             marginBottom: 6,
           },
         }}
       >
-        <Tab.Screen name="记录">{() => <DashboardScreen token={auth.token} onAuthInvalid={onLogout} />}</Tab.Screen>
+        <Tab.Screen name="记录">
+          {() => (
+            <DashboardScreen
+              token={auth.token}
+              onAuthInvalid={onLogout}
+              journalThemeMode={journalThemeMode}
+              onJournalThemeModeChange={setJournalThemeMode}
+            />
+          )}
+        </Tab.Screen>
         <Tab.Screen name="目标">{() => <TargetsScreen token={auth.token} />}</Tab.Screen>
         <Tab.Screen name="体重">{() => <WeightTrackerScreen token={auth.token} />}</Tab.Screen>
         <Tab.Screen name="动态">{() => <SocialNavigator token={auth.token} user={auth.user} onLogout={onLogout} />}</Tab.Screen>
       </Tab.Navigator>
-      <StatusBar style="light" />
+      <StatusBar style={journalTheme.statusBar} />
     </NavigationContainer>
   );
 }
@@ -5752,6 +5989,25 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
   },
+  journalThemeToggle: {
+    minWidth: 68,
+    minHeight: 36,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  journalThemeToggleIcon: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  journalThemeToggleText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
   journalRemainText: {
     marginLeft: "auto",
     color: "#c8d7f3",
@@ -5877,6 +6133,107 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     padding: 8,
+  },
+  journalChartCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    gap: 10,
+  },
+  journalChartContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  journalCalorieChart: {
+    width: 116,
+    height: 116,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  journalCalorieRing: {
+    width: 116,
+    height: 116,
+    borderRadius: 58,
+  },
+  journalCalorieSegment: {
+    position: "absolute",
+    width: 5,
+    height: 14,
+    borderRadius: 999,
+  },
+  journalCalorieCenter: {
+    position: "absolute",
+    left: 20,
+    top: 20,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  journalCalorieValue: {
+    fontSize: 24,
+    fontWeight: "900",
+    lineHeight: 28,
+  },
+  journalCalorieLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  journalMacroChart: {
+    flex: 1,
+    gap: 8,
+  },
+  journalMacroChartRow: {
+    gap: 4,
+  },
+  journalMacroHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  journalMacroChartLabel: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  journalMacroChartValue: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  journalMacroTrack: {
+    height: 10,
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  journalMacroFill: {
+    height: "100%",
+    borderRadius: 999,
+  },
+  journalCalorieMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    gap: 10,
+    flexWrap: "wrap",
+    paddingTop: 2,
+  },
+  journalCalorieMetaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  journalCalorieMetaDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  journalCalorieMetaText: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   journalCardTitle: {
     color: "#eaf2ff",
