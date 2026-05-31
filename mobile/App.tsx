@@ -34,6 +34,12 @@ const ANALYZE_REQUEST_TIMEOUT_MS =
 const CALORIE_RING_SEGMENT_COUNT = 28;
 const CALORIE_RING_CENTER = 48;
 const CALORIE_RING_RADIUS = 39;
+const tabIconMap: Record<string, string> = {
+  记录: "⌂",
+  目标: "◎",
+  体重: "◇",
+  动态: "✦",
+};
 
 type JournalThemeMode = "day" | "night";
 
@@ -154,7 +160,7 @@ function useThemedAppStyles() {
       optionChipActive: { backgroundColor: theme.accentSoft, borderColor: theme.accent },
       optionChipText: { color: theme.textMuted },
       optionChipTextActive: { color: theme.activeText },
-      logRow: { borderTopColor: theme.border },
+      logRow: { borderTopColor: theme.borderStrong },
       logTitle: { color: theme.text },
       logSub: { color: theme.textMuted },
       dynamicCircleButton: { backgroundColor: theme.surface, borderColor: theme.border },
@@ -3676,42 +3682,47 @@ function DashboardScreen({
         </View>
 
         <Modal visible={Boolean(editLogId)} transparent animationType='fade' onRequestClose={closeEditModal}>
-          <View style={styles.journalEditModalMask}>
-            <View style={styles.journalEditModalCard}>
-              <Text style={styles.journalEditModalTitle}>编辑记录</Text>
+          <View
+            style={[
+              styles.journalEditModalMask,
+              { backgroundColor: journalThemeMode === "day" ? "rgba(52, 43, 36, 0.36)" : "rgba(3, 8, 18, 0.72)" },
+            ]}
+          >
+            <View style={[styles.journalEditModalCard, themedJournal.surface]}>
+              <Text style={[styles.journalEditModalTitle, themedJournal.text]}>编辑记录</Text>
 
               <TextInput
-                style={[styles.input, styles.journalEditInput]}
+                style={[styles.input, styles.journalEditInput, themedJournal.input]}
                 value={editNote}
                 onChangeText={setEditNote}
                 placeholder='这条记录的描述'
-                placeholderTextColor='#8f9bb0'
+                placeholderTextColor={journalTheme.placeholder}
                 multiline
               />
 
               <View style={styles.journalEditGrid}>
                 <TextInput
-                  style={[styles.input, styles.journalEditInput]}
+                  style={[styles.input, styles.journalEditInput, themedJournal.input]}
                   value={editDate}
                   onChangeText={setEditDate}
                   placeholder='日期 YYYY-MM-DD'
-                  placeholderTextColor='#8f9bb0'
+                  placeholderTextColor={journalTheme.placeholder}
                 />
                 <TextInput
-                  style={[styles.input, styles.journalEditInput]}
+                  style={[styles.input, styles.journalEditInput, themedJournal.input]}
                   value={editTime}
                   onChangeText={setEditTime}
                   placeholder='时间 HH:mm'
-                  placeholderTextColor='#8f9bb0'
+                  placeholderTextColor={journalTheme.placeholder}
                 />
               </View>
 
               <View style={styles.journalEditGrid}>
-                <TextInput style={[styles.input, styles.journalEditInput]} value={editCalories} onChangeText={setEditCalories} keyboardType='decimal-pad' placeholder='热量(千卡)' placeholderTextColor='#8f9bb0' />
-                <TextInput style={[styles.input, styles.journalEditInput]} value={editProtein} onChangeText={setEditProtein} keyboardType='decimal-pad' placeholder='蛋白质(g)' placeholderTextColor='#8f9bb0' />
-                <TextInput style={[styles.input, styles.journalEditInput]} value={editCarbs} onChangeText={setEditCarbs} keyboardType='decimal-pad' placeholder='碳水(g)' placeholderTextColor='#8f9bb0' />
-                <TextInput style={[styles.input, styles.journalEditInput]} value={editFat} onChangeText={setEditFat} keyboardType='decimal-pad' placeholder='脂肪(g)' placeholderTextColor='#8f9bb0' />
-                <TextInput style={[styles.input, styles.journalEditInput]} value={editFiber} onChangeText={setEditFiber} keyboardType='decimal-pad' placeholder='纤维(g)' placeholderTextColor='#8f9bb0' />
+                <TextInput style={[styles.input, styles.journalEditInput, themedJournal.input]} value={editCalories} onChangeText={setEditCalories} keyboardType='decimal-pad' placeholder='热量(千卡)' placeholderTextColor={journalTheme.placeholder} />
+                <TextInput style={[styles.input, styles.journalEditInput, themedJournal.input]} value={editProtein} onChangeText={setEditProtein} keyboardType='decimal-pad' placeholder='蛋白质(g)' placeholderTextColor={journalTheme.placeholder} />
+                <TextInput style={[styles.input, styles.journalEditInput, themedJournal.input]} value={editCarbs} onChangeText={setEditCarbs} keyboardType='decimal-pad' placeholder='碳水(g)' placeholderTextColor={journalTheme.placeholder} />
+                <TextInput style={[styles.input, styles.journalEditInput, themedJournal.input]} value={editFat} onChangeText={setEditFat} keyboardType='decimal-pad' placeholder='脂肪(g)' placeholderTextColor={journalTheme.placeholder} />
+                <TextInput style={[styles.input, styles.journalEditInput, themedJournal.input]} value={editFiber} onChangeText={setEditFiber} keyboardType='decimal-pad' placeholder='纤维(g)' placeholderTextColor={journalTheme.placeholder} />
               </View>
 
               <OptionRow label='可见范围' options={visibilityOptions} value={editVisibility} onChange={setEditVisibility} />
@@ -3729,68 +3740,73 @@ function DashboardScreen({
         </Modal>
 
         <Modal visible={Boolean(editExerciseId)} transparent animationType='fade' onRequestClose={closeExerciseEditModal}>
-          <View style={styles.journalEditModalMask}>
-            <View style={styles.journalEditModalCard}>
-              <Text style={styles.journalEditModalTitle}>编辑运动</Text>
+          <View
+            style={[
+              styles.journalEditModalMask,
+              { backgroundColor: journalThemeMode === "day" ? "rgba(52, 43, 36, 0.36)" : "rgba(3, 8, 18, 0.72)" },
+            ]}
+          >
+            <View style={[styles.journalEditModalCard, themedJournal.surface]}>
+              <Text style={[styles.journalEditModalTitle, themedJournal.text]}>编辑运动</Text>
 
               <TextInput
-                style={[styles.input, styles.journalEditInput]}
+                style={[styles.input, styles.journalEditInput, themedJournal.input]}
                 value={editExerciseType}
                 onChangeText={setEditExerciseType}
                 placeholder='运动类型，例如跑步、力量训练'
-                placeholderTextColor='#8f9bb0'
+                placeholderTextColor={journalTheme.placeholder}
               />
 
               <TextInput
-                style={[styles.input, styles.journalEditInput]}
+                style={[styles.input, styles.journalEditInput, themedJournal.input]}
                 value={editExerciseNote}
                 onChangeText={setEditExerciseNote}
                 placeholder='备注（可选）'
-                placeholderTextColor='#8f9bb0'
+                placeholderTextColor={journalTheme.placeholder}
                 multiline
               />
 
               <View style={styles.journalEditGrid}>
                 <TextInput
-                  style={[styles.input, styles.journalEditInput]}
+                  style={[styles.input, styles.journalEditInput, themedJournal.input]}
                   value={editExerciseDate}
                   onChangeText={setEditExerciseDate}
                   placeholder='日期 YYYY-MM-DD'
-                  placeholderTextColor='#8f9bb0'
+                  placeholderTextColor={journalTheme.placeholder}
                 />
                 <TextInput
-                  style={[styles.input, styles.journalEditInput]}
+                  style={[styles.input, styles.journalEditInput, themedJournal.input]}
                   value={editExerciseTime}
                   onChangeText={setEditExerciseTime}
                   placeholder='时间 HH:mm'
-                  placeholderTextColor='#8f9bb0'
+                  placeholderTextColor={journalTheme.placeholder}
                 />
               </View>
 
               <View style={styles.journalEditGrid}>
                 <TextInput
-                  style={[styles.input, styles.journalEditInput]}
+                  style={[styles.input, styles.journalEditInput, themedJournal.input]}
                   value={editExerciseDuration}
                   onChangeText={setEditExerciseDuration}
                   keyboardType='decimal-pad'
                   placeholder='时长(分钟)'
-                  placeholderTextColor='#8f9bb0'
+                  placeholderTextColor={journalTheme.placeholder}
                 />
                 <TextInput
-                  style={[styles.input, styles.journalEditInput]}
+                  style={[styles.input, styles.journalEditInput, themedJournal.input]}
                   value={editExerciseCalories}
                   onChangeText={setEditExerciseCalories}
                   keyboardType='decimal-pad'
                   placeholder='消耗(千卡)'
-                  placeholderTextColor='#8f9bb0'
+                  placeholderTextColor={journalTheme.placeholder}
                 />
                 <TextInput
-                  style={[styles.input, styles.journalEditInput]}
+                  style={[styles.input, styles.journalEditInput, themedJournal.input]}
                   value={editExerciseMet}
                   onChangeText={setEditExerciseMet}
                   keyboardType='decimal-pad'
                   placeholder='MET'
-                  placeholderTextColor='#8f9bb0'
+                  placeholderTextColor={journalTheme.placeholder}
                 />
               </View>
 
@@ -5529,20 +5545,28 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
     <JournalThemeContext.Provider value={journalTheme}>
       <NavigationContainer>
         <Tab.Navigator
-          screenOptions={{
+          screenOptions={({ route }) => ({
             headerShown: false,
+            tabBarIcon: ({ color, focused }) => (
+              <Text style={[styles.tabBarIcon, { color, fontSize: focused ? 20 : 18 }]}>{tabIconMap[route.name] ?? "•"}</Text>
+            ),
             tabBarStyle: {
-              height: 62,
+              height: 54,
               backgroundColor: journalTheme.tabBar,
               borderTopColor: journalTheme.tabBorder,
+              paddingTop: 3,
+              paddingBottom: 4,
             },
+            tabBarItemStyle: styles.tabBarItem,
+            tabBarIconStyle: styles.tabBarIconWrap,
             tabBarActiveTintColor: journalTheme.accent,
             tabBarInactiveTintColor: journalTheme.textMuted,
             tabBarLabelStyle: {
-              fontSize: 12,
-              marginBottom: 6,
+              fontSize: 10,
+              fontWeight: "700",
+              marginTop: -2,
             },
-          }}
+          })}
         >
           <Tab.Screen name="记录">
             {() => (
@@ -5658,6 +5682,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     gap: 8,
+  },
+  tabBarItem: {
+    paddingVertical: 2,
+  },
+  tabBarIconWrap: {
+    marginTop: 1,
+  },
+  tabBarIcon: {
+    fontWeight: "800",
+    lineHeight: 21,
   },
   authContainer: {
     padding: 24,
