@@ -160,6 +160,61 @@ function buildImagePrompt(description: string | undefined, weightKg: number) {
   ].join("\n");
 }
 
+function parseJsonOrStreamPayload(text: string) {
+  const raw = text.trim();
+  if (!raw) {
+    throw new Error("AI returned an empty response");
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Some OpenAI-compatible gateways return SSE data lines instead of a
+    // single JSON response. Convert deltas back into a chat-completion shape.
+  }
+
+  const chunks = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim())
+    .filter((line) => line && line !== "[DONE]")
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean) as any[];
+
+  const content = chunks
+    .map((chunk) => {
+      const choice = chunk?.choices?.[0];
+      const delta = choice?.delta?.content;
+      const message = choice?.message?.content;
+      if (typeof delta === "string") {
+        return delta;
+      }
+      if (typeof message === "string") {
+        return message;
+      }
+      return "";
+    })
+    .join("");
+
+  if (content.trim()) {
+    return { choices: [{ message: { content } }] };
+  }
+
+  const finalChunk = [...chunks].reverse().find(Boolean);
+  if (finalChunk) {
+    return finalChunk;
+  }
+
+  throw new Error(`AI response is not valid JSON: ${raw.slice(0, 200)}`);
+}
+
 async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -170,7 +225,7 @@ async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: n
       const text = await response.text();
       throw new Error(`AI API request failed (${response.status}): ${text}`);
     }
-    return response.json();
+    return parseJsonOrStreamPayload(await response.text());
   } catch (error) {
     if ((error as Error).name === "AbortError") {
       throw new Error(`AI request timeout (>${timeoutMs}ms): ${safeUrl}`);

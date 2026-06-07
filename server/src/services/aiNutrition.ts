@@ -435,6 +435,61 @@ function buildTextPrompt(description: string) {
   ].join("\n");
 }
 
+function parseJsonOrStreamPayload(text: string) {
+  const raw = text.trim();
+  if (!raw) {
+    throw new Error("AI 返回空响应");
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Some OpenAI-compatible gateways return server-sent events even when
+    // stream=false. Rebuild a normal chat-completion payload from data lines.
+  }
+
+  const chunks = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim())
+    .filter((line) => line && line !== "[DONE]")
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean) as any[];
+
+  const content = chunks
+    .map((chunk) => {
+      const choice = chunk?.choices?.[0];
+      const delta = choice?.delta?.content;
+      const message = choice?.message?.content;
+      if (typeof delta === "string") {
+        return delta;
+      }
+      if (typeof message === "string") {
+        return message;
+      }
+      return "";
+    })
+    .join("");
+
+  if (content.trim()) {
+    return { choices: [{ message: { content } }] };
+  }
+
+  const finalChunk = [...chunks].reverse().find(Boolean);
+  if (finalChunk) {
+    return finalChunk;
+  }
+
+  throw new Error(`AI 返回内容不是有效 JSON：${raw.slice(0, 200)}`);
+}
+
 async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -451,7 +506,7 @@ async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: n
       throw new Error(`AI 接口调用失败（${response.status}）：${errorText}`);
     }
 
-    return response.json();
+    return parseJsonOrStreamPayload(await response.text());
   } catch (error) {
     if ((error as Error).name === "AbortError") {
       throw new Error(`AI 请求超时（>${timeoutMs}ms）：${safeUrl}`);
