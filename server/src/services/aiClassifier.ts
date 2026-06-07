@@ -38,7 +38,9 @@ function shouldUseGeminiNative(rawProvider: string, rawBaseUrl: string, model: s
     provider === "gemini" ||
     provider === "gemini_native" ||
     provider === "google_gemini" ||
-    ((provider === "openai_compat_auto" || provider === "") && /\/v1beta\/models\/?$/i.test(rawBaseUrl) && /^gemini-/i.test(model.trim()))
+    ((provider === "openai_compat_auto" || provider === "") &&
+      /\/v1beta(?:\/models)?\/?$/i.test(rawBaseUrl) &&
+      /^gemini-/i.test(model.trim()))
   );
 }
 

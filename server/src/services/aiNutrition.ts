@@ -318,7 +318,7 @@ function resolveImageDetail(rawInput?: string): "low" | "high" | "auto" {
 function shouldUseGeminiNative(provider: AIProvider, rawBaseUrl: string, model: string) {
   return (
     provider === "gemini" ||
-    (provider === "openai_compat_auto" && /\/v1beta\/models\/?$/i.test(rawBaseUrl) && /^gemini-/i.test(model.trim()))
+    (provider === "openai_compat_auto" && /\/v1beta(?:\/models)?\/?$/i.test(rawBaseUrl) && /^gemini-/i.test(model.trim()))
   );
 }
 
