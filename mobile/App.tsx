@@ -3120,32 +3120,22 @@ function DashboardScreen({
   const calorieTargetForChart = useMemo(() => {
     const profileTarget = Number(dailyTarget?.targetCalories ?? 0);
     if (profileTarget > 0) {
-      return profileTarget + Math.max(0, Number(exerciseSummary.calories ?? 0));
+      return profileTarget;
     }
-    return Math.max(1, Number(summary.calories ?? 0), Number(exerciseSummary.calories ?? 0));
-  }, [dailyTarget?.targetCalories, exerciseSummary.calories, summary.calories]);
+    return Math.max(1, Math.abs(netCalories), Number(summary.calories ?? 0), Number(exerciseSummary.calories ?? 0));
+  }, [dailyTarget?.targetCalories, exerciseSummary.calories, netCalories, summary.calories]);
 
   const calorieProgress = useMemo(() => {
-    return clamp(Number(summary.calories ?? 0) / calorieTargetForChart, 0, 1);
-  }, [calorieTargetForChart, summary.calories]);
+    return clamp(Math.abs(netCalories) / calorieTargetForChart, 0, 1);
+  }, [calorieTargetForChart, netCalories]);
 
   const calorieRingSegments = useMemo(() => {
-    const intakeCount = Math.round(calorieProgress * CALORIE_RING_SEGMENT_COUNT);
-    const exerciseShare = clamp(
-      Math.max(0, Number(exerciseSummary.calories ?? 0)) / Math.max(calorieTargetForChart, 1),
-      0,
-      1,
-    );
-    const exerciseCount = Math.round(exerciseShare * CALORIE_RING_SEGMENT_COUNT);
-    const intakeColor = remainCalories !== null && remainCalories < 0 ? journalTheme.danger : journalTheme.calorie;
+    const netCount = Math.round(calorieProgress * CALORIE_RING_SEGMENT_COUNT);
+    const netColor =
+      netCalories < 0 ? journalTheme.exercise : remainCalories !== null && remainCalories < 0 ? journalTheme.danger : journalTheme.calorie;
     return Array.from({ length: CALORIE_RING_SEGMENT_COUNT }, (_, index) => {
       const angle = (index / CALORIE_RING_SEGMENT_COUNT) * Math.PI * 2 - Math.PI / 2;
-      let backgroundColor = journalTheme.chartTrack;
-      if (index < intakeCount) {
-        backgroundColor = intakeColor;
-      } else if (index < Math.min(CALORIE_RING_SEGMENT_COUNT, intakeCount + exerciseCount)) {
-        backgroundColor = journalTheme.exercise;
-      }
+      const backgroundColor = index < netCount ? netColor : journalTheme.chartTrack;
       return {
         backgroundColor,
         left: CALORIE_RING_CENTER + Math.cos(angle) * CALORIE_RING_RADIUS - 2.5,
@@ -3153,7 +3143,7 @@ function DashboardScreen({
         transform: [{ rotate: `${(index / CALORIE_RING_SEGMENT_COUNT) * 360}deg` }],
       };
     });
-  }, [calorieProgress, calorieTargetForChart, exerciseSummary.calories, journalTheme.calorie, journalTheme.chartTrack, journalTheme.danger, journalTheme.exercise, remainCalories]);
+  }, [calorieProgress, journalTheme.calorie, journalTheme.chartTrack, journalTheme.danger, journalTheme.exercise, netCalories, remainCalories]);
 
   const calorieCenterValue = remainCalories === null ? netCalories : remainCalories;
   const calorieCenterLabel = remainCalories === null ? "净摄入 kcal" : "剩余 kcal";
