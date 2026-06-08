@@ -34,7 +34,6 @@ const ANALYZE_REQUEST_TIMEOUT_MS =
 const CALORIE_RING_SEGMENT_COUNT = 28;
 const CALORIE_RING_CENTER = 48;
 const CALORIE_RING_RADIUS = 39;
-const CALORIE_RING_EXERCISE_RADIUS = 28;
 const tabIconMap: Record<string, string> = {
   记录: "⌂",
   目标: "◎",
@@ -3130,38 +3129,31 @@ function DashboardScreen({
     return clamp(Number(summary.calories ?? 0) / calorieTargetForChart, 0, 1);
   }, [calorieTargetForChart, summary.calories]);
 
-  const exerciseProgress = useMemo(() => {
-    const exerciseCalories = Math.max(0, Number(exerciseSummary.calories ?? 0));
-    const baseline = Math.max(250, Number(dailyTarget?.targetCalories ?? 0) * 0.25, exerciseCalories);
-    return clamp(exerciseCalories / baseline, 0, 1);
-  }, [dailyTarget?.targetCalories, exerciseSummary.calories]);
-
   const calorieRingSegments = useMemo(() => {
-    const activeCount = Math.round(calorieProgress * CALORIE_RING_SEGMENT_COUNT);
-    const activeColor = remainCalories !== null && remainCalories < 0 ? journalTheme.danger : journalTheme.calorie;
+    const intakeCount = Math.round(calorieProgress * CALORIE_RING_SEGMENT_COUNT);
+    const exerciseShare = clamp(
+      Math.max(0, Number(exerciseSummary.calories ?? 0)) / Math.max(calorieTargetForChart, 1),
+      0,
+      1,
+    );
+    const exerciseCount = Math.round(exerciseShare * CALORIE_RING_SEGMENT_COUNT);
+    const intakeColor = remainCalories !== null && remainCalories < 0 ? journalTheme.danger : journalTheme.calorie;
     return Array.from({ length: CALORIE_RING_SEGMENT_COUNT }, (_, index) => {
       const angle = (index / CALORIE_RING_SEGMENT_COUNT) * Math.PI * 2 - Math.PI / 2;
+      let backgroundColor = journalTheme.chartTrack;
+      if (index < intakeCount) {
+        backgroundColor = intakeColor;
+      } else if (index < Math.min(CALORIE_RING_SEGMENT_COUNT, intakeCount + exerciseCount)) {
+        backgroundColor = journalTheme.exercise;
+      }
       return {
-        backgroundColor: index < activeCount ? activeColor : journalTheme.chartTrack,
+        backgroundColor,
         left: CALORIE_RING_CENTER + Math.cos(angle) * CALORIE_RING_RADIUS - 2.5,
         top: CALORIE_RING_CENTER + Math.sin(angle) * CALORIE_RING_RADIUS - 7,
         transform: [{ rotate: `${(index / CALORIE_RING_SEGMENT_COUNT) * 360}deg` }],
       };
     });
-  }, [calorieProgress, journalTheme.calorie, journalTheme.chartTrack, journalTheme.danger, remainCalories]);
-
-  const exerciseRingSegments = useMemo(() => {
-    const activeCount = Math.round(exerciseProgress * CALORIE_RING_SEGMENT_COUNT);
-    return Array.from({ length: CALORIE_RING_SEGMENT_COUNT }, (_, index) => {
-      const angle = (index / CALORIE_RING_SEGMENT_COUNT) * Math.PI * 2 - Math.PI / 2;
-      return {
-        backgroundColor: index < activeCount ? journalTheme.exercise : "transparent",
-        left: CALORIE_RING_CENTER + Math.cos(angle) * CALORIE_RING_EXERCISE_RADIUS - 2,
-        top: CALORIE_RING_CENTER + Math.sin(angle) * CALORIE_RING_EXERCISE_RADIUS - 5,
-        transform: [{ rotate: `${(index / CALORIE_RING_SEGMENT_COUNT) * 360}deg` }],
-      };
-    });
-  }, [exerciseProgress, journalTheme.exercise]);
+  }, [calorieProgress, calorieTargetForChart, exerciseSummary.calories, journalTheme.calorie, journalTheme.chartTrack, journalTheme.danger, journalTheme.exercise, remainCalories]);
 
   const calorieCenterValue = remainCalories === null ? netCalories : remainCalories;
   const calorieCenterLabel = remainCalories === null ? "净摄入 kcal" : "剩余 kcal";
@@ -3496,9 +3488,6 @@ function DashboardScreen({
               <View style={[styles.journalCalorieRing, { backgroundColor: journalTheme.surface }]}>
                 {calorieRingSegments.map((segmentStyle, index) => (
                   <View key={index} style={[styles.journalCalorieSegment, segmentStyle]} />
-                ))}
-                {exerciseRingSegments.map((segmentStyle, index) => (
-                  <View key={`exercise-${index}`} style={[styles.journalExerciseSegment, segmentStyle]} />
                 ))}
                 <View style={[styles.journalCalorieCenter, { backgroundColor: journalTheme.surface }]}>
                   <Text
@@ -6322,12 +6311,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     width: 5,
     height: 14,
-    borderRadius: 999,
-  },
-  journalExerciseSegment: {
-    position: "absolute",
-    width: 4,
-    height: 10,
     borderRadius: 999,
   },
   journalCalorieCenter: {
