@@ -34,6 +34,7 @@ const ANALYZE_REQUEST_TIMEOUT_MS =
 const CALORIE_RING_SEGMENT_COUNT = 28;
 const CALORIE_RING_CENTER = 48;
 const CALORIE_RING_RADIUS = 39;
+const CALORIE_RING_EXERCISE_RADIUS = 28;
 const tabIconMap: Record<string, string> = {
   记录: "⌂",
   目标: "◎",
@@ -3129,6 +3130,12 @@ function DashboardScreen({
     return clamp(Number(summary.calories ?? 0) / calorieTargetForChart, 0, 1);
   }, [calorieTargetForChart, summary.calories]);
 
+  const exerciseProgress = useMemo(() => {
+    const exerciseCalories = Math.max(0, Number(exerciseSummary.calories ?? 0));
+    const baseline = Math.max(250, Number(dailyTarget?.targetCalories ?? 0) * 0.25, exerciseCalories);
+    return clamp(exerciseCalories / baseline, 0, 1);
+  }, [dailyTarget?.targetCalories, exerciseSummary.calories]);
+
   const calorieRingSegments = useMemo(() => {
     const activeCount = Math.round(calorieProgress * CALORIE_RING_SEGMENT_COUNT);
     const activeColor = remainCalories !== null && remainCalories < 0 ? journalTheme.danger : journalTheme.calorie;
@@ -3142,6 +3149,19 @@ function DashboardScreen({
       };
     });
   }, [calorieProgress, journalTheme.calorie, journalTheme.chartTrack, journalTheme.danger, remainCalories]);
+
+  const exerciseRingSegments = useMemo(() => {
+    const activeCount = Math.round(exerciseProgress * CALORIE_RING_SEGMENT_COUNT);
+    return Array.from({ length: CALORIE_RING_SEGMENT_COUNT }, (_, index) => {
+      const angle = (index / CALORIE_RING_SEGMENT_COUNT) * Math.PI * 2 - Math.PI / 2;
+      return {
+        backgroundColor: index < activeCount ? journalTheme.exercise : "transparent",
+        left: CALORIE_RING_CENTER + Math.cos(angle) * CALORIE_RING_EXERCISE_RADIUS - 2,
+        top: CALORIE_RING_CENTER + Math.sin(angle) * CALORIE_RING_EXERCISE_RADIUS - 5,
+        transform: [{ rotate: `${(index / CALORIE_RING_SEGMENT_COUNT) * 360}deg` }],
+      };
+    });
+  }, [exerciseProgress, journalTheme.exercise]);
 
   const calorieCenterValue = remainCalories === null ? netCalories : remainCalories;
   const calorieCenterLabel = remainCalories === null ? "净摄入 kcal" : "剩余 kcal";
@@ -3477,6 +3497,9 @@ function DashboardScreen({
                 {calorieRingSegments.map((segmentStyle, index) => (
                   <View key={index} style={[styles.journalCalorieSegment, segmentStyle]} />
                 ))}
+                {exerciseRingSegments.map((segmentStyle, index) => (
+                  <View key={`exercise-${index}`} style={[styles.journalExerciseSegment, segmentStyle]} />
+                ))}
                 <View style={[styles.journalCalorieCenter, { backgroundColor: journalTheme.surface }]}>
                   <Text
                     style={[
@@ -3488,6 +3511,12 @@ function DashboardScreen({
                   </Text>
                   <Text style={[styles.journalCalorieLabel, themedJournal.mutedText]}>{calorieCenterLabel}</Text>
                 </View>
+              </View>
+              <View style={styles.journalRingLegendColumn}>
+                <Text style={[styles.journalRingLegendText, themedJournal.softText]}>摄入 {Math.round(summary.calories)}</Text>
+                <Text style={[styles.journalRingLegendText, { color: journalTheme.exercise }]}>
+                  运动 -{Math.round(exerciseSummary.calories)}
+                </Text>
               </View>
             </View>
 
@@ -6295,26 +6324,41 @@ const styles = StyleSheet.create({
     height: 14,
     borderRadius: 999,
   },
+  journalExerciseSegment: {
+    position: "absolute",
+    width: 4,
+    height: 10,
+    borderRadius: 999,
+  },
   journalCalorieCenter: {
     position: "absolute",
-    left: 17,
-    top: 17,
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    left: 24,
+    top: 24,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
   },
   journalCalorieValue: {
-    fontSize: 21,
+    fontSize: 18,
     fontWeight: "900",
-    lineHeight: 24,
+    lineHeight: 21,
   },
   journalCalorieLabel: {
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: "700",
     marginTop: 2,
+  },
+  journalRingLegendColumn: {
+    marginTop: 6,
+    alignItems: "center",
+    gap: 2,
+  },
+  journalRingLegendText: {
+    fontSize: 10,
+    fontWeight: "800",
   },
   journalMacroChart: {
     flex: 1,
