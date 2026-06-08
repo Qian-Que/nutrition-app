@@ -3126,16 +3126,26 @@ function DashboardScreen({
   }, [dailyTarget?.targetCalories, exerciseSummary.calories, netCalories, summary.calories]);
 
   const calorieProgress = useMemo(() => {
-    return clamp(Math.abs(netCalories) / calorieTargetForChart, 0, 1);
-  }, [calorieTargetForChart, netCalories]);
+    return clamp(Number(summary.calories ?? 0) / calorieTargetForChart, 0, 1);
+  }, [calorieTargetForChart, summary.calories]);
 
   const calorieRingSegments = useMemo(() => {
-    const netCount = Math.round(calorieProgress * CALORIE_RING_SEGMENT_COUNT);
-    const netColor =
-      netCalories < 0 ? journalTheme.exercise : remainCalories !== null && remainCalories < 0 ? journalTheme.danger : journalTheme.calorie;
+    const intakeCount = Math.round(calorieProgress * CALORIE_RING_SEGMENT_COUNT);
+    const exerciseCoverCount = Math.min(
+      intakeCount,
+      Math.round(
+        clamp(Math.max(0, Number(exerciseSummary.calories ?? 0)) / Math.max(calorieTargetForChart, 1), 0, 1) *
+          CALORIE_RING_SEGMENT_COUNT,
+      ),
+    );
+    const exerciseStartIndex = Math.max(0, intakeCount - exerciseCoverCount);
+    const intakeColor = remainCalories !== null && remainCalories < 0 ? journalTheme.danger : journalTheme.calorie;
     return Array.from({ length: CALORIE_RING_SEGMENT_COUNT }, (_, index) => {
       const angle = (index / CALORIE_RING_SEGMENT_COUNT) * Math.PI * 2 - Math.PI / 2;
-      const backgroundColor = index < netCount ? netColor : journalTheme.chartTrack;
+      let backgroundColor = journalTheme.chartTrack;
+      if (index < intakeCount) {
+        backgroundColor = index >= exerciseStartIndex ? journalTheme.exercise : intakeColor;
+      }
       return {
         backgroundColor,
         left: CALORIE_RING_CENTER + Math.cos(angle) * CALORIE_RING_RADIUS - 2.5,
@@ -3143,7 +3153,7 @@ function DashboardScreen({
         transform: [{ rotate: `${(index / CALORIE_RING_SEGMENT_COUNT) * 360}deg` }],
       };
     });
-  }, [calorieProgress, journalTheme.calorie, journalTheme.chartTrack, journalTheme.danger, journalTheme.exercise, netCalories, remainCalories]);
+  }, [calorieProgress, calorieTargetForChart, exerciseSummary.calories, journalTheme.calorie, journalTheme.chartTrack, journalTheme.danger, journalTheme.exercise, remainCalories]);
 
   const calorieCenterValue = remainCalories === null ? netCalories : remainCalories;
   const calorieCenterLabel = remainCalories === null ? "净摄入 kcal" : "剩余 kcal";
@@ -3485,10 +3495,20 @@ function DashboardScreen({
                       styles.journalCalorieValue,
                       { color: remainCalories !== null && remainCalories < 0 ? journalTheme.danger : journalTheme.text },
                     ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.65}
                   >
                     {Math.round(calorieCenterValue)}
                   </Text>
-                  <Text style={[styles.journalCalorieLabel, themedJournal.mutedText]}>{calorieCenterLabel}</Text>
+                  <Text
+                    style={[styles.journalCalorieLabel, themedJournal.mutedText]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
+                  >
+                    {calorieCenterLabel}
+                  </Text>
                 </View>
               </View>
               <View style={styles.journalRingLegendColumn}>
