@@ -777,6 +777,23 @@ function isNetworkLikeError(error: unknown) {
   );
 }
 
+function isAmbiguousWriteError(error: unknown) {
+  if (isNetworkLikeError(error) || isTimeoutLikeError(error)) {
+    return true;
+  }
+  return error instanceof ApiRequestError && (error.status === undefined || error.status >= 500);
+}
+
+function isSameLoggedMoment(actual: string, expected: string) {
+  const actualTime = new Date(actual).getTime();
+  const expectedTime = new Date(expected).getTime();
+  return Number.isFinite(actualTime) && Number.isFinite(expectedTime) && Math.abs(actualTime - expectedTime) <= 1500;
+}
+
+function isNearlyEqual(actual: number | null | undefined, expected: number, tolerance = 0.2) {
+  return Math.abs(Number(actual ?? 0) - expected) <= tolerance;
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -2360,7 +2377,7 @@ function DashboardScreen({
     setEditExerciseVisibility('PRIVATE');
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options?: { silent?: boolean }) => {
     setLoading(true);
     try {
       const [logPayload, targetPayload] = await Promise.all([
@@ -2446,13 +2463,15 @@ function DashboardScreen({
         onAuthInvalid();
         return;
       }
-      Alert.alert('加载失败', normalizeErrorMessage(error));
+      if (!options?.silent) {
+        Alert.alert('加载失败', normalizeErrorMessage(error));
+      }
     } finally {
       setLoading(false);
     }
   }, [onAuthInvalid, selectedDate, token]);
 
-  const loadCalendar = useCallback(async () => {
+  const loadCalendar = useCallback(async (options?: { silent?: boolean }) => {
     setCalendarLoading(true);
     try {
       const payload = await apiRequest<{ month: string; days: CalendarDaySummary[] }>(
@@ -2470,7 +2489,9 @@ function DashboardScreen({
         onAuthInvalid();
         return;
       }
-      Alert.alert('加载日历失败', normalizeErrorMessage(error));
+      if (!options?.silent) {
+        Alert.alert('加载日历失败', normalizeErrorMessage(error));
+      }
     } finally {
       setCalendarLoading(false);
     }
@@ -2512,7 +2533,7 @@ function DashboardScreen({
         if (editLogId === log.id) {
           resetEditState();
         }
-        await Promise.all([load(), loadCalendar()]);
+        await Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
       } catch (error) {
         if (isUnauthorizedError(error)) {
           onAuthInvalid();
@@ -2582,7 +2603,7 @@ function DashboardScreen({
         if (detailExerciseId === exercise.id) {
           setDetailExerciseId(null);
         }
-        await load();
+        await load({ silent: true });
       } catch (error) {
         if (isUnauthorizedError(error)) {
           onAuthInvalid();
@@ -2683,7 +2704,7 @@ function DashboardScreen({
         setSelectedMonth(toMonthString(nextSelectedDate));
         await loadCalendar();
       } else {
-        await Promise.all([load(), loadCalendar()]);
+        await Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
       }
     } catch (error) {
       if (isUnauthorizedError(error)) {
@@ -2776,7 +2797,7 @@ function DashboardScreen({
         setSelectedDate(nextSelectedDate);
         setSelectedMonth(toMonthString(nextSelectedDate));
       } else {
-        await load();
+        await load({ silent: true });
       }
     } catch (error) {
       if (isUnauthorizedError(error)) {
@@ -2822,29 +2843,60 @@ function DashboardScreen({
       const persistExerciseAnalysis = async (analysisRaw: ExerciseAnalysis, notePrefix?: string) => {
         const analysis = normalizeExerciseAnalysis(analysisRaw);
         const noteParts = [notePrefix?.trim(), analysis.notes?.trim()].filter(Boolean);
-        await apiRequest(
-          '/api/exercises',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              loggedAt: buildLoggedAtForSelectedDate(selectedDate),
-              exerciseType: analysis.exerciseType,
-              durationMin: analysis.durationMin,
-              intensity: analysis.intensity,
-              met: analysis.met,
-              calories: analysis.calories,
-              note: noteParts.join('；'),
-              source: 'AI',
-              visibility: conversationVisibility,
-              ...aiUsageFromAnalysis(analysis),
-            }),
-          },
-          token,
-        );
+        const loggedAt = buildLoggedAtForSelectedDate(selectedDate);
+        const note = noteParts.join('；');
+        const requestBody = {
+          loggedAt,
+          exerciseType: analysis.exerciseType,
+          durationMin: analysis.durationMin,
+          intensity: analysis.intensity,
+          met: analysis.met,
+          calories: analysis.calories,
+          note,
+          source: 'AI' as const,
+          visibility: conversationVisibility,
+          ...aiUsageFromAnalysis(analysis),
+        };
+
+        try {
+          await apiRequest('/api/exercises', { method: 'POST', body: JSON.stringify(requestBody) }, token);
+        } catch (saveError) {
+          if (!isAmbiguousWriteError(saveError)) {
+            throw saveError;
+          }
+
+          let confirmed = false;
+          try {
+            const verification = await apiRequest<{
+              exercises: ExerciseLog[];
+              summary: { calories: number; durationMin: number };
+            }>(`/api/exercises?date=${selectedDate}`, {}, token);
+            confirmed = verification.exercises.some(
+              (item) =>
+                item.source === 'AI' &&
+                isSameLoggedMoment(item.loggedAt, loggedAt) &&
+                item.exerciseType === analysis.exerciseType &&
+                isNearlyEqual(item.durationMin, analysis.durationMin) &&
+                isNearlyEqual(item.calories, analysis.calories) &&
+                (item.note ?? '') === note,
+            );
+            if (confirmed) {
+              setExercises(verification.exercises);
+              setExerciseSummary(verification.summary);
+            }
+          } catch (verificationError) {
+            if (isUnauthorizedError(verificationError)) {
+              throw verificationError;
+            }
+          }
+          if (!confirmed) {
+            throw saveError;
+          }
+        }
 
         setConversationInput('');
         clearConversationImage();
-        await Promise.all([load(), loadCalendar()]);
+        await Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
       };
 
       try {
@@ -3004,36 +3056,66 @@ function DashboardScreen({
         : usedTextFallback
           ? `${baseNote}（图片未成功解析，已按文字估算）`
           : baseNote;
+      const loggedAt = buildLoggedAtForSelectedDate(selectedDate);
+      const requestBody = {
+        loggedAt,
+        mealType: inferMealTypeForDate(selectedDate),
+        source: 'AI' as const,
+        visibility: conversationVisibility,
+        imageUri: conversationImageUri ?? undefined,
+        note,
+        calories: normalized.calories,
+        proteinGram: normalized.proteinGram,
+        carbsGram: normalized.carbsGram,
+        fatGram: normalized.fatGram,
+        fiberGram: normalized.fiberGram,
+        sugarGram: normalized.sugarGram,
+        sodiumMg: normalized.sodiumMg,
+        nutrients: normalized.nutrients,
+        items: analysis.items,
+        ...aiUsageFromAnalysis(analysis),
+      };
 
-      await apiRequest(
-        '/api/logs',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            loggedAt: buildLoggedAtForSelectedDate(selectedDate),
-            mealType: inferMealTypeForDate(selectedDate),
-            source: 'AI',
-            visibility: conversationVisibility,
-            imageUri: conversationImageUri ?? undefined,
-            note,
-            calories: normalized.calories,
-            proteinGram: normalized.proteinGram,
-            carbsGram: normalized.carbsGram,
-            fatGram: normalized.fatGram,
-            fiberGram: normalized.fiberGram,
-            sugarGram: normalized.sugarGram,
-            sodiumMg: normalized.sodiumMg,
-            nutrients: normalized.nutrients,
-            items: analysis.items,
-            ...aiUsageFromAnalysis(analysis),
-          }),
-        },
-        token,
-      );
+      try {
+        await apiRequest('/api/logs', { method: 'POST', body: JSON.stringify(requestBody) }, token);
+      } catch (saveError) {
+        if (!isAmbiguousWriteError(saveError)) {
+          throw saveError;
+        }
+
+        let confirmed = false;
+        try {
+          const verification = await apiRequest<{
+            logs: FoodLog[];
+            summary: { calories: number; proteinGram: number; carbsGram: number; fatGram: number; fiberGram: number };
+          }>(`/api/logs?date=${selectedDate}`, {}, token);
+          confirmed = verification.logs.some(
+            (item) =>
+              item.source === 'AI' &&
+              isSameLoggedMoment(item.loggedAt, loggedAt) &&
+              (item.note ?? '') === note &&
+              isNearlyEqual(item.calories, normalized.calories) &&
+              isNearlyEqual(item.proteinGram, normalized.proteinGram) &&
+              isNearlyEqual(item.carbsGram, normalized.carbsGram) &&
+              isNearlyEqual(item.fatGram, normalized.fatGram),
+          );
+          if (confirmed) {
+            setLogs(verification.logs);
+            setSummary(verification.summary);
+          }
+        } catch (verificationError) {
+          if (isUnauthorizedError(verificationError)) {
+            throw verificationError;
+          }
+        }
+        if (!confirmed) {
+          throw saveError;
+        }
+      }
 
       setConversationInput('');
       clearConversationImage();
-      await Promise.all([load(), loadCalendar()]);
+      await Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
     } catch (error) {
       if (isUnauthorizedError(error)) {
         onAuthInvalid();
@@ -3999,33 +4081,57 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
       .map((part) => part.trim())
       .filter((part) => part.length > 0);
     const mergedNote = noteParts.length > 0 ? noteParts.join("；") : undefined;
+    const loggedAt = new Date().toISOString();
+    const requestBody = {
+      loggedAt,
+      mealType,
+      source: "AI" as const,
+      visibility,
+      imageUri: imageUri ?? undefined,
+      note: mergedNote,
+      calories: normalized.calories,
+      proteinGram: normalized.proteinGram,
+      carbsGram: normalized.carbsGram,
+      fatGram: normalized.fatGram,
+      fiberGram: normalized.fiberGram,
+      sugarGram: normalized.sugarGram,
+      sodiumMg: normalized.sodiumMg,
+      nutrients: normalized.nutrients,
+      items: analysis.items,
+      ...aiUsageFromAnalysis(analysis),
+    };
 
     setLoading(true);
     try {
-      await apiRequest(
-        "/api/logs",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            mealType,
-            source: "AI",
-            visibility,
-            imageUri: imageUri ?? undefined,
-            note: mergedNote,
-            calories: normalized.calories,
-            proteinGram: normalized.proteinGram,
-            carbsGram: normalized.carbsGram,
-            fatGram: normalized.fatGram,
-            fiberGram: normalized.fiberGram,
-            sugarGram: normalized.sugarGram,
-            sodiumMg: normalized.sodiumMg,
-            nutrients: normalized.nutrients,
-            items: analysis.items,
-            ...aiUsageFromAnalysis(analysis),
-          }),
-        },
-        token,
-      );
+      try {
+        await apiRequest("/api/logs", { method: "POST", body: JSON.stringify(requestBody) }, token);
+      } catch (saveError) {
+        if (!isAmbiguousWriteError(saveError)) {
+          throw saveError;
+        }
+
+        let confirmed = false;
+        try {
+          const verification = await apiRequest<{ logs: FoodLog[] }>(`/api/logs?date=${todayDateString()}`, {}, token);
+          confirmed = verification.logs.some(
+            (item) =>
+              item.source === "AI" &&
+              isSameLoggedMoment(item.loggedAt, loggedAt) &&
+              (item.note ?? "") === (mergedNote ?? "") &&
+              isNearlyEqual(item.calories, normalized.calories) &&
+              isNearlyEqual(item.proteinGram, normalized.proteinGram) &&
+              isNearlyEqual(item.carbsGram, normalized.carbsGram) &&
+              isNearlyEqual(item.fatGram, normalized.fatGram),
+          );
+        } catch (verificationError) {
+          if (isUnauthorizedError(verificationError)) {
+            throw verificationError;
+          }
+        }
+        if (!confirmed) {
+          throw saveError;
+        }
+      }
       Alert.alert("保存成功", "智能识别结果已保存为饮食记录。");
       onSaved();
     } catch (error) {
