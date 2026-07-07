@@ -301,6 +301,7 @@ type AiConversationDraft = {
 
 type FoodLog = {
   id: string;
+  clientRequestId?: string | null;
   loggedAt: string;
   mealType: MealType;
   source: "MANUAL" | "AI";
@@ -325,6 +326,7 @@ type ExerciseIntensity = "LOW" | "MODERATE" | "HIGH";
 
 type ExerciseLog = {
   id: string;
+  clientRequestId?: string | null;
   loggedAt: string;
   exerciseType: string;
   durationMin: number;
@@ -794,8 +796,77 @@ function isNearlyEqual(actual: number | null | undefined, expected: number, tole
   return Math.abs(Number(actual ?? 0) - expected) <= tolerance;
 }
 
+async function verifyAmbiguousWrite(check: () => Promise<boolean>) {
+  let checked = false;
+  let lastError: unknown;
+  for (const waitMs of [0, 700, 1800, 3200]) {
+    if (waitMs > 0) {
+      await delay(waitMs);
+    }
+    try {
+      const found = await check();
+      checked = true;
+      if (found) {
+        return { confirmed: true, checked: true, lastError: undefined };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  return { confirmed: false, checked, lastError };
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function persistWithAmbiguousRecovery<T>(
+  path: string,
+  body: Record<string, unknown>,
+  token: string,
+  verify: () => Promise<boolean>,
+): Promise<"saved" | "pending"> {
+  const persist = () => apiRequest<T>(path, { method: "POST", body: JSON.stringify(body) }, token);
+
+  try {
+    await persist();
+    return "saved";
+  } catch (firstError) {
+    if (!isAmbiguousWriteError(firstError)) {
+      throw firstError;
+    }
+
+    const firstVerification = await verifyAmbiguousWrite(verify);
+    if (isUnauthorizedError(firstVerification.lastError)) {
+      throw firstVerification.lastError;
+    }
+    if (firstVerification.confirmed) {
+      return "saved";
+    }
+    if (!firstVerification.checked) {
+      return "pending";
+    }
+
+    try {
+      await persist();
+      return "saved";
+    } catch (retryError) {
+      if (!isAmbiguousWriteError(retryError)) {
+        throw retryError;
+      }
+      const retryVerification = await verifyAmbiguousWrite(verify);
+      if (isUnauthorizedError(retryVerification.lastError)) {
+        throw retryVerification.lastError;
+      }
+      if (retryVerification.confirmed) {
+        return "saved";
+      }
+      if (!retryVerification.checked) {
+        return "pending";
+      }
+      throw retryError;
+    }
+  }
 }
 
 function estimateFromDescription(description: string, hasImage: boolean): NutritionAnalysis {
@@ -2843,9 +2914,11 @@ function DashboardScreen({
       const persistExerciseAnalysis = async (analysisRaw: ExerciseAnalysis, notePrefix?: string) => {
         const analysis = normalizeExerciseAnalysis(analysisRaw);
         const noteParts = [notePrefix?.trim(), analysis.notes?.trim()].filter(Boolean);
+        const clientRequestId = createConversationMessageId();
         const loggedAt = buildLoggedAtForSelectedDate(selectedDate);
         const note = noteParts.join('；');
         const requestBody = {
+          clientRequestId,
           loggedAt,
           exerciseType: analysis.exerciseType,
           durationMin: analysis.durationMin,
@@ -2858,40 +2931,53 @@ function DashboardScreen({
           ...aiUsageFromAnalysis(analysis),
         };
 
-        try {
-          await apiRequest('/api/exercises', { method: 'POST', body: JSON.stringify(requestBody) }, token);
-        } catch (saveError) {
-          if (!isAmbiguousWriteError(saveError)) {
-            throw saveError;
-          }
-
-          let confirmed = false;
-          try {
+        const saveState = await persistWithAmbiguousRecovery<{ exercise: ExerciseLog }>(
+          '/api/exercises',
+          requestBody,
+          token,
+          async () => {
             const verification = await apiRequest<{
               exercises: ExerciseLog[];
               summary: { calories: number; durationMin: number };
             }>(`/api/exercises?date=${selectedDate}`, {}, token);
-            confirmed = verification.exercises.some(
+            const confirmed = verification.exercises.some(
               (item) =>
-                item.source === 'AI' &&
-                isSameLoggedMoment(item.loggedAt, loggedAt) &&
-                item.exerciseType === analysis.exerciseType &&
-                isNearlyEqual(item.durationMin, analysis.durationMin) &&
-                isNearlyEqual(item.calories, analysis.calories) &&
-                (item.note ?? '') === note,
+                item.clientRequestId === clientRequestId ||
+                (item.source === 'AI' &&
+                  isSameLoggedMoment(item.loggedAt, loggedAt) &&
+                  item.exerciseType === analysis.exerciseType &&
+                  isNearlyEqual(item.durationMin, analysis.durationMin) &&
+                  isNearlyEqual(item.calories, analysis.calories) &&
+                  (item.note ?? '') === note),
             );
             if (confirmed) {
               setExercises(verification.exercises);
               setExerciseSummary(verification.summary);
             }
-          } catch (verificationError) {
-            if (isUnauthorizedError(verificationError)) {
-              throw verificationError;
-            }
-          }
-          if (!confirmed) {
-            throw saveError;
-          }
+            return confirmed;
+          },
+        );
+
+        if (saveState === 'pending') {
+          const optimisticExercise: ExerciseLog = {
+            id: `pending-${clientRequestId}`,
+            clientRequestId,
+            loggedAt,
+            exerciseType: analysis.exerciseType,
+            durationMin: analysis.durationMin,
+            intensity: analysis.intensity,
+            met: analysis.met,
+            calories: analysis.calories,
+            note,
+            source: 'AI',
+            visibility: conversationVisibility,
+            ...aiUsageFromAnalysis(analysis),
+          };
+          setExercises((current) => [optimisticExercise, ...current.filter((item) => item.clientRequestId !== clientRequestId)]);
+          setExerciseSummary((current) => ({
+            calories: current.calories + analysis.calories,
+            durationMin: current.durationMin + analysis.durationMin,
+          }));
         }
 
         setConversationInput('');
@@ -3056,10 +3142,13 @@ function DashboardScreen({
         : usedTextFallback
           ? `${baseNote}（图片未成功解析，已按文字估算）`
           : baseNote;
+      const clientRequestId = createConversationMessageId();
       const loggedAt = buildLoggedAtForSelectedDate(selectedDate);
+      const mealType = inferMealTypeForDate(selectedDate);
       const requestBody = {
+        clientRequestId,
         loggedAt,
-        mealType: inferMealTypeForDate(selectedDate),
+        mealType,
         source: 'AI' as const,
         visibility: conversationVisibility,
         imageUri: conversationImageUri ?? undefined,
@@ -3076,41 +3165,63 @@ function DashboardScreen({
         ...aiUsageFromAnalysis(analysis),
       };
 
-      try {
-        await apiRequest('/api/logs', { method: 'POST', body: JSON.stringify(requestBody) }, token);
-      } catch (saveError) {
-        if (!isAmbiguousWriteError(saveError)) {
-          throw saveError;
-        }
-
-        let confirmed = false;
-        try {
+      const saveState = await persistWithAmbiguousRecovery<{ log: FoodLog }>(
+        '/api/logs',
+        requestBody,
+        token,
+        async () => {
           const verification = await apiRequest<{
             logs: FoodLog[];
             summary: { calories: number; proteinGram: number; carbsGram: number; fatGram: number; fiberGram: number };
           }>(`/api/logs?date=${selectedDate}`, {}, token);
-          confirmed = verification.logs.some(
+          const confirmed = verification.logs.some(
             (item) =>
-              item.source === 'AI' &&
-              isSameLoggedMoment(item.loggedAt, loggedAt) &&
-              (item.note ?? '') === note &&
-              isNearlyEqual(item.calories, normalized.calories) &&
-              isNearlyEqual(item.proteinGram, normalized.proteinGram) &&
-              isNearlyEqual(item.carbsGram, normalized.carbsGram) &&
-              isNearlyEqual(item.fatGram, normalized.fatGram),
+              item.clientRequestId === clientRequestId ||
+              (item.source === 'AI' &&
+                isSameLoggedMoment(item.loggedAt, loggedAt) &&
+                (item.note ?? '') === note &&
+                isNearlyEqual(item.calories, normalized.calories) &&
+                isNearlyEqual(item.proteinGram, normalized.proteinGram) &&
+                isNearlyEqual(item.carbsGram, normalized.carbsGram) &&
+                isNearlyEqual(item.fatGram, normalized.fatGram)),
           );
           if (confirmed) {
             setLogs(verification.logs);
             setSummary(verification.summary);
           }
-        } catch (verificationError) {
-          if (isUnauthorizedError(verificationError)) {
-            throw verificationError;
-          }
-        }
-        if (!confirmed) {
-          throw saveError;
-        }
+          return confirmed;
+        },
+      );
+
+      if (saveState === 'pending') {
+        const optimisticLog: FoodLog = {
+          id: `pending-${clientRequestId}`,
+          clientRequestId,
+          loggedAt,
+          mealType,
+          source: 'AI',
+          visibility: conversationVisibility,
+          imageUri: conversationImageUri ?? undefined,
+          note,
+          calories: normalized.calories,
+          proteinGram: normalized.proteinGram,
+          carbsGram: normalized.carbsGram,
+          fatGram: normalized.fatGram,
+          fiberGram: normalized.fiberGram,
+          sugarGram: normalized.sugarGram,
+          sodiumMg: normalized.sodiumMg,
+          nutrients: normalized.nutrients,
+          items: analysis.items,
+          ...aiUsageFromAnalysis(analysis),
+        };
+        setLogs((current) => [optimisticLog, ...current.filter((item) => item.clientRequestId !== clientRequestId)]);
+        setSummary((current) => ({
+          calories: current.calories + normalized.calories,
+          proteinGram: current.proteinGram + normalized.proteinGram,
+          carbsGram: current.carbsGram + normalized.carbsGram,
+          fatGram: current.fatGram + normalized.fatGram,
+          fiberGram: current.fiberGram + normalized.fiberGram,
+        }));
       }
 
       setConversationInput('');
@@ -4081,8 +4192,10 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
       .map((part) => part.trim())
       .filter((part) => part.length > 0);
     const mergedNote = noteParts.length > 0 ? noteParts.join("；") : undefined;
+    const clientRequestId = createConversationMessageId();
     const loggedAt = new Date().toISOString();
     const requestBody = {
+      clientRequestId,
       loggedAt,
       mealType,
       source: "AI" as const,
@@ -4103,35 +4216,25 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
 
     setLoading(true);
     try {
-      try {
-        await apiRequest("/api/logs", { method: "POST", body: JSON.stringify(requestBody) }, token);
-      } catch (saveError) {
-        if (!isAmbiguousWriteError(saveError)) {
-          throw saveError;
-        }
-
-        let confirmed = false;
-        try {
+      await persistWithAmbiguousRecovery<{ log: FoodLog }>(
+        "/api/logs",
+        requestBody,
+        token,
+        async () => {
           const verification = await apiRequest<{ logs: FoodLog[] }>(`/api/logs?date=${todayDateString()}`, {}, token);
-          confirmed = verification.logs.some(
+          return verification.logs.some(
             (item) =>
-              item.source === "AI" &&
-              isSameLoggedMoment(item.loggedAt, loggedAt) &&
-              (item.note ?? "") === (mergedNote ?? "") &&
-              isNearlyEqual(item.calories, normalized.calories) &&
-              isNearlyEqual(item.proteinGram, normalized.proteinGram) &&
-              isNearlyEqual(item.carbsGram, normalized.carbsGram) &&
-              isNearlyEqual(item.fatGram, normalized.fatGram),
+              item.clientRequestId === clientRequestId ||
+              (item.source === "AI" &&
+                isSameLoggedMoment(item.loggedAt, loggedAt) &&
+                (item.note ?? "") === (mergedNote ?? "") &&
+                isNearlyEqual(item.calories, normalized.calories) &&
+                isNearlyEqual(item.proteinGram, normalized.proteinGram) &&
+                isNearlyEqual(item.carbsGram, normalized.carbsGram) &&
+                isNearlyEqual(item.fatGram, normalized.fatGram)),
           );
-        } catch (verificationError) {
-          if (isUnauthorizedError(verificationError)) {
-            throw verificationError;
-          }
-        }
-        if (!confirmed) {
-          throw saveError;
-        }
-      }
+        },
+      );
       Alert.alert("保存成功", "智能识别结果已保存为饮食记录。");
       onSaved();
     } catch (error) {

@@ -10,6 +10,7 @@ export const exercisesRouter = Router();
 type ExerciseRow = {
   id: string;
   user_id: string;
+  client_request_id: string | null;
   logged_at: string;
   exercise_type: string;
   duration_min: number;
@@ -37,6 +38,7 @@ function mapExerciseRow(row: ExerciseRow) {
   return {
     id: row.id,
     userId: row.user_id,
+    clientRequestId: row.client_request_id,
     loggedAt: row.logged_at,
     exerciseType: row.exercise_type,
     durationMin: row.duration_min,
@@ -149,6 +151,15 @@ exercisesRouter.post("/", requireAuth, async (req, res) => {
   }
 
   const data = parsed.data;
+  if (data.clientRequestId) {
+    const existing = db
+      .prepare("SELECT * FROM exercise_logs WHERE user_id = ? AND client_request_id = ?")
+      .get(req.user!.id, data.clientRequestId) as ExerciseRow | undefined;
+    if (existing) {
+      res.json({ exercise: mapExerciseRow(existing), deduplicated: true });
+      return;
+    }
+  }
   const id = createId();
   const now = nowIso();
   const loggedAt = data.loggedAt ? new Date(data.loggedAt).toISOString() : now;
@@ -157,12 +168,13 @@ exercisesRouter.post("/", requireAuth, async (req, res) => {
 
   db.prepare(
     `INSERT INTO exercise_logs (
-      id, user_id, logged_at, exercise_type, duration_min, intensity, met, calories,
+      id, user_id, client_request_id, logged_at, exercise_type, duration_min, intensity, met, calories,
       note, source, visibility, ai_provider, ai_model, ai_route, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     req.user!.id,
+    data.clientRequestId ?? null,
     loggedAt,
     data.exerciseType,
     data.durationMin,

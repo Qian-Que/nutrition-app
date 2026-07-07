@@ -9,6 +9,7 @@ export const logsRouter = Router();
 type LogRow = {
   id: string;
   user_id: string;
+  client_request_id: string | null;
   logged_at: string;
   meal_type: string;
   note: string | null;
@@ -64,6 +65,7 @@ function mapLogRow(row: LogRow) {
   return {
     id: row.id,
     userId: row.user_id,
+    clientRequestId: row.client_request_id,
     loggedAt: row.logged_at,
     mealType: row.meal_type,
     note: row.note,
@@ -169,19 +171,29 @@ logsRouter.post("/", requireAuth, async (req, res) => {
   }
 
   const data = parsed.data;
+  if (data.clientRequestId) {
+    const existing = db
+      .prepare("SELECT * FROM food_logs WHERE user_id = ? AND client_request_id = ?")
+      .get(req.user!.id, data.clientRequestId) as LogRow | undefined;
+    if (existing) {
+      res.json({ log: mapLogRow(existing), deduplicated: true });
+      return;
+    }
+  }
   const id = createId();
   const now = nowIso();
   const loggedAt = data.loggedAt ? new Date(data.loggedAt).toISOString() : now;
 
   db.prepare(
     `INSERT INTO food_logs (
-      id, user_id, logged_at, meal_type, note, image_uri, source, visibility,
+      id, user_id, client_request_id, logged_at, meal_type, note, image_uri, source, visibility,
       calories, protein_gram, carbs_gram, fat_gram, fiber_gram, sugar_gram, sodium_mg,
       nutrients_json, items_json, ai_provider, ai_model, ai_route, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     req.user!.id,
+    data.clientRequestId ?? null,
     loggedAt,
     data.mealType,
     data.note ?? null,

@@ -63,6 +63,7 @@ export const updateTargetsSchema = z.object({
 });
 
 export const createLogSchema = z.object({
+  clientRequestId: z.string().min(8).max(80).optional(),
   loggedAt: z.iso.datetime().optional(),
   mealType: z.enum(mealTypeValues).default("SNACK"),
   note: z.string().max(300, "备注最多 300 字").optional(),
@@ -102,6 +103,7 @@ export const createLogSchema = z.object({
 });
 
 export const createExerciseLogSchema = z.object({
+  clientRequestId: z.string().min(8).max(80).optional(),
   loggedAt: z.iso.datetime().optional(),
   exerciseType: z.string().min(1, "运动类型不能为空").max(60, "运动类型最多 60 字"),
   durationMin: z.number().min(1, "运动时长至少 1 分钟").max(600, "运动时长最多 600 分钟"),

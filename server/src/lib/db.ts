@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS food_logs (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
+  client_request_id TEXT,
   logged_at TEXT NOT NULL,
   meal_type TEXT NOT NULL,
   note TEXT,
@@ -66,6 +67,7 @@ CREATE INDEX IF NOT EXISTS idx_food_logs_user_logged_at ON food_logs (user_id, l
 CREATE TABLE IF NOT EXISTS exercise_logs (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
+  client_request_id TEXT,
   logged_at TEXT NOT NULL,
   exercise_type TEXT NOT NULL,
   duration_min REAL NOT NULL,
@@ -185,11 +187,20 @@ ensureColumn("food_logs", "nutrients_json", "nutrients_json TEXT");
 ensureColumn("food_logs", "ai_provider", "ai_provider TEXT");
 ensureColumn("food_logs", "ai_model", "ai_model TEXT");
 ensureColumn("food_logs", "ai_route", "ai_route TEXT");
+ensureColumn("food_logs", "client_request_id", "client_request_id TEXT");
 ensureColumn("exercise_logs", "ai_provider", "ai_provider TEXT");
 ensureColumn("exercise_logs", "ai_model", "ai_model TEXT");
 ensureColumn("exercise_logs", "ai_route", "ai_route TEXT");
+ensureColumn("exercise_logs", "client_request_id", "client_request_id TEXT");
 ensureColumn("users", "target_weight_kg", "target_weight_kg REAL");
 ensureColumn("users", "weekly_weight_change_kg", "weekly_weight_change_kg REAL");
+
+db.exec(`
+CREATE UNIQUE INDEX IF NOT EXISTS idx_food_logs_user_client_request
+  ON food_logs (user_id, client_request_id) WHERE client_request_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_exercise_logs_user_client_request
+  ON exercise_logs (user_id, client_request_id) WHERE client_request_id IS NOT NULL;
+`);
 
 export function createId() {
   return randomUUID().replace(/-/g, "");
